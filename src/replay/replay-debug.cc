@@ -541,6 +541,15 @@ char* CommandCallback(const char* command, const char* params) {
 
 void RecordReplaySetGlue(const RecordReplayGlue* glue) { gGlue = glue; }
 
+void RecordReplayOnIsolateDispose(Isolate* isolate) {
+  if (!recordreplay::IsRecordingOrReplaying()) return;
+  if (gGlue) gGlue->on_isolate_dispose(isolate);
+  if (!gScripts) return;
+  for (auto it = gScripts->begin(); it != gScripts->end();) {
+    it = it->second.isolate == isolate ? gScripts->erase(it) : std::next(it);
+  }
+}
+
 void RecordReplaySetCurrentConsoleCall(const char* level, void* args) {
   gCurrentConsoleLevel = level;
   gCurrentConsoleArgs = args;

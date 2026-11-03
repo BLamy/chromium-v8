@@ -52,6 +52,8 @@ V8_EXPORT_PRIVATE bool RecordReplayIgnoreScriptByURL(const char* url);
 V8_EXPORT_PRIVATE void RecordReplayRegisterScript(Isolate* isolate,
                                                   DirectHandle<Script> script);
 V8_EXPORT_PRIVATE int RecordReplayNextScriptId();
+// Scripts live for as long as their isolate, and can't be read after it's gone.
+V8_EXPORT_PRIVATE void RecordReplayOnIsolateDispose(Isolate* isolate);
 bool RecordReplayIsRegisteredScript(int script_id);
 char* CommandCallback(const char* command, const char* params);
 void ClearPauseDataCallback();
@@ -70,6 +72,7 @@ struct RecordReplayGlue {
   std::string (*run_command)(Isolate* isolate, const char* command,
                              const char* params);
   void (*clear_pause_data)(Isolate* isolate);
+  void (*on_isolate_dispose)(Isolate* isolate);
 };
 V8_EXPORT_PRIVATE void RecordReplaySetGlue(const RecordReplayGlue* glue);
 

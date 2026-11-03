@@ -301,11 +301,20 @@ void RecordReplayClearGluePauseData(Isolate* i_isolate) {
       context, v8::Undefined(isolate), 0, nullptr));
 }
 
+void RecordReplayDisposeGlue(Isolate* i_isolate) {
+  if (!gGlue) return;
+  auto iter = gGlue->find(reinterpret_cast<v8::Isolate*>(i_isolate));
+  if (iter == gGlue->end()) return;
+  delete iter->second;
+  gGlue->erase(iter);
+}
+
 // Called from a static initializer in the inspector, which brings this file along
 // wherever the inspector is linked.
 void RecordReplayInstallGlue() {
   static const RecordReplayGlue kGlue = {RecordReplayRunGlueCommand,
-                                         RecordReplayClearGluePauseData};
+                                         RecordReplayClearGluePauseData,
+                                         RecordReplayDisposeGlue};
   RecordReplaySetGlue(&kGlue);
 }
 

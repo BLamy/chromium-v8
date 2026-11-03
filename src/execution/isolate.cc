@@ -5091,6 +5091,7 @@ void Isolate::RegisterMicrotaskQueue(MicrotaskQueue* queue) {
 }
 
 void Isolate::Deinit() {
+  RecordReplayOnIsolateDispose(this);
   TRACE_ISOLATE(deinit);
 
 #ifdef V8_ENABLE_REGEXP_DIAGNOSTICS
