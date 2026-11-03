@@ -75,7 +75,12 @@ void ApplyFlagOverrides() {
   v8_flags.compilation_cache = false;
   v8_flags.incremental_marking = false;
   v8_flags.incremental_marking_task = false;
+  v8_flags.minor_gc_task = false;
   v8_flags.memory_reducer = false;
+
+  // WeakRefs and FinalizationRegistries are strong, as when their targets die is
+  // visible to the program and depends on when the GC runs. See VisitJSWeakRef.
+  v8_flags.handle_weak_ref_weakly_in_minor_gc = false;
 
   // Async stack traces depend on how code was compiled.
   v8_flags.async_stack_traces = false;

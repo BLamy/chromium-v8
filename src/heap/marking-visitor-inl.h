@@ -13,6 +13,7 @@
 #include "src/heap/heap-layout-inl.h"
 #include "src/heap/heap-visitor-inl.h"
 #include "src/heap/heap-visitor.h"
+#include "src/replay/replay.h"
 #include "src/heap/marking-progress-tracker.h"
 #include "src/heap/marking-state-inl.h"
 #include "src/heap/marking-worklist-inl.h"
@@ -768,6 +769,11 @@ size_t MarkingVisitorBase<ConcreteVisitor>::VisitJSWeakRef(
       // didn't visit it.
       ObjectSlot slot(&weak_ref->target_);
       concrete_visitor()->RecordSlot(weak_ref, slot, target);
+    } else if (recordreplay::IsRecordingOrReplaying()) {
+      // When a target dies is visible to the program, and depends on when the GC
+      // runs, which isn't part of a recording. The language lets a WeakRef keep
+      // its target alive for as long as it likes.
+      ProcessStrongHeapObject(weak_ref, ObjectSlot(&weak_ref->target_), target);
     } else {
       // JSWeakRef points to a potentially dead object. We have to process them
       // when we know the liveness of the whole transitive closure.
@@ -795,6 +801,11 @@ size_t MarkingVisitorBase<ConcreteVisitor>::VisitWeakCell(
     concrete_visitor()->RecordSlot(weak_cell, slot, target);
     slot = ObjectSlot(&weak_cell->unregister_token_);
     concrete_visitor()->RecordSlot(weak_cell, slot, unregister_token);
+  } else if (recordreplay::IsRecordingOrReplaying()) {
+    // A FinalizationRegistry never has to call back. See VisitJSWeakRef.
+    ProcessStrongHeapObject(weak_cell, ObjectSlot(&weak_cell->target_), target);
+    ProcessStrongHeapObject(weak_cell, ObjectSlot(&weak_cell->unregister_token_),
+                            unregister_token);
   } else {
     // WeakCell points to a potentially dead object or a dead unregister
     // token. We have to process them when we know the liveness of the whole
