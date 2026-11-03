@@ -48,6 +48,7 @@
 #include "src/objects/contexts.h"
 #include "src/objects/debug-objects.h"
 #include "src/objects/js-objects.h"
+#include "src/objects/promise.h"
 #include "src/objects/tagged.h"
 #include "src/runtime/runtime.h"
 #include "src/sandbox/external-pointer-table.h"
@@ -2479,6 +2480,24 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
                                        v8::ExceptionContext callback_kind);
   void SetExceptionPropagationCallback(ExceptionPropagationCallback callback);
 
+  inline Handle<Object> promise_context_tag();
+  inline bool has_promise_context_tag();
+  inline void clear_promise_context_tag();
+  inline void set_promise_context_tag(Handle<Object> tag);
+  inline void set_promise_cross_context_callback(
+      PromiseCrossContextCallback callback);
+  inline void set_promise_cross_context_resolve_callback(
+      PromiseCrossContextResolveCallback callback);
+  MaybeHandle<JSPromise> RunPromiseCrossContextCallback(
+      Handle<NativeContext> context, Handle<JSPromise> promise);
+
+  Maybe<void> RunPromiseCrossContextResolveCallback(
+      v8::Isolate* isolate, Handle<JSObject> tag,
+      DirectHandle<Object> promise_or_data, DirectHandle<Object> argument,
+      PromiseReaction::Type type);
+
+  inline bool has_promise_context_resolve_callback();
+
 #ifdef V8_ENABLE_WASM_SIMD256_REVEC
   void set_wasm_revec_verifier_for_test(
       compiler::turboshaft::WasmRevecVerifier* verifier) {
@@ -3023,6 +3042,14 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
   bool is_frozen_ = false;
 
   friend class HandleScopeImplementer;
+  PromiseCrossContextCallback promise_cross_context_callback_ = nullptr;
+  PromiseCrossContextResolveCallback promise_cross_context_resolve_callback_ =
+      nullptr;
+  bool in_promise_cross_context_callback_ = false;
+  bool in_promise_cross_context_resolve_callback_ = false;
+
+  class PromiseCrossContextCallbackScope;
+
   friend class GlobalSafepoint;
   friend class heap::HeapTester;
   friend class IsolateForPointerCompression;
@@ -3030,6 +3057,7 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
   friend class IsolateGroup;
   friend class TestSerializer;
   friend class SharedHeapNoClientsTest;
+  friend class PromiseCrossContextCallbackScope;
 };
 
 // The current entered Isolate and its thread data. Do not access these

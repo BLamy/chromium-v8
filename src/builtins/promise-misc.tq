@@ -54,6 +54,7 @@ macro PromiseInit(promise: JSPromise): void {
     is_silent: false,
     async_task_id: kInvalidAsyncTaskId
   });
+  promise.context_tag = kZero;
   promise_internal::ZeroOutEmbedderOffsets(promise);
 }
 
@@ -74,6 +75,7 @@ macro InnerNewJSPromise(implicit context: Context)(): JSPromise {
     is_silent: false,
     async_task_id: kInvalidAsyncTaskId
   });
+  promise.context_tag = kZero;
   return promise;
 }
 
@@ -273,6 +275,7 @@ transitioning macro NewJSPromise(implicit context: Context)(parent: Object):
     JSPromise {
   const instance = InnerNewJSPromise();
   PromiseInit(instance);
+  runtime::PromiseContextInit(instance);
   RunAnyPromiseHookInit(instance, parent);
   return instance;
 }
@@ -296,6 +299,7 @@ transitioning macro NewJSPromise(
   instance.reactions_or_result = result;
   instance.SetStatus(status);
   promise_internal::ZeroOutEmbedderOffsets(instance);
+  runtime::PromiseContextInit(instance);
   RunAnyPromiseHookInit(instance, Undefined);
   return instance;
 }

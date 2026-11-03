@@ -13,6 +13,6 @@ namespace v8::internal {
 // TODO(dmercadier): try to compile builtins in an order such that callees are
 // compiled before callers, so that we can make use of the CanAllocate
 // information for callees when computing callers.
-bool BuiltinCanAllocate(Builtin builtin) { return true; }
+bool BuiltinCanAllocate(Builtin builtin) { return false; }
 
 }  // namespace v8::internal

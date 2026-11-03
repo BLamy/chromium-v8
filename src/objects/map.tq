@@ -114,13 +114,17 @@ bitfield struct ExtendedMapBitsEx extends uint8 {
 }
 
 // Base class for Maps with extra fields. Subclasses must be defined with
-// @hasSameInstanceTypeAsParent and define padding fields up to kTaggedSize.
+// @hasSameInstanceTypeAsParent.
 @cppObjectLayoutDefinition
 @hasSameInstanceTypeAsParent
 @doNotGenerateCast
 extern class ExtendedMap extends Map {
   bit_field_ex: ExtendedMapBitsEx;
-  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
+  // Keep the non-tagged fields in one kTaggedSize slot so subclasses begin at
+  // tagged alignment.
+  flags: uint8;
+  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[2]: uint8;
+  @if(TAGGED_SIZE_8_BYTES) extended_padding[6]: uint8;
 }
 
 @export

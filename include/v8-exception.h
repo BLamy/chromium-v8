@@ -48,6 +48,14 @@ class V8_EXPORT Exception {
   static Local<Value> WasmSuspendError(Local<String> message,
                                        Local<Value> options = {});
   static Local<Value> Error(Local<String> message, Local<Value> options = {});
+  static Local<Value> URIError(Local<String> message,
+                               Local<Value> options = {});
+  static Local<Value> EvalError(Local<String> message,
+                               Local<Value> options = {});
+  static Local<Value> AggregateError(Local<String> message,
+                                     Local<Value> options = {});
+  static Local<Value> SuppressedError(Local<String> message,
+                                      Local<Value> options = {});
 
   /**
    * Creates an error message for the given exception.

@@ -439,18 +439,21 @@ constexpr bool CanTriggerGC(T... properties) {
   F(StrictNotEqual, 2, 1)                  \
   F(ReferenceEqual, 2, 1)
 
-#define FOR_EACH_INTRINSIC_PROMISE(F, I) \
-  F(EnqueueMicrotask, 1, 1)              \
-  F(PromiseHookAfter, 1, 1)              \
-  F(PromiseHookBefore, 1, 1)             \
-  F(PromiseHookInit, 2, 1)               \
-  F(PromiseRejectEventFromStack, 2, 1)   \
-  F(PromiseRevokeReject, 1, 1)           \
-  F(RejectPromise, 3, 1)                 \
-  F(ResolvePromise, 2, 1)                \
-  F(ConstructSuppressedError, 3, 1)      \
-  F(ConstructAggregateErrorHelper, 4, 1) \
-  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1)
+#define FOR_EACH_INTRINSIC_PROMISE(F, I)                    \
+  F(EnqueueMicrotask, 1, 1)                                 \
+  F(PromiseHookAfter, 1, 1)                                 \
+  F(PromiseHookBefore, 1, 1)                                \
+  F(PromiseHookInit, 2, 1)                                  \
+  F(PromiseRejectEventFromStack, 2, 1)                      \
+  F(PromiseRevokeReject, 1, 1)                              \
+  F(RejectPromise, 3, 1)                                    \
+  F(ResolvePromise, 2, 1)                                   \
+  F(ConstructSuppressedError, 3, 1)                         \
+  F(ConstructAggregateErrorHelper, 4, 1)                    \
+  F(ConstructInternalAggregateErrorHelper, -1 /* <= 5*/, 1) \
+  F(PromiseContextInit, 1, 1)                               \
+  F(PromiseContextCheck, 1, 1)                              \
+  F(PromiseResolveContextCheck, 1, 1)
 
 #define FOR_EACH_INTRINSIC_PROXY(F, I) \
   F(CheckProxyGetSetTrapResult, 4, 1)  \

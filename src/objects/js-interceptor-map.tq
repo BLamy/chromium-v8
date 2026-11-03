@@ -8,9 +8,6 @@
 @hasSameInstanceTypeAsParent
 @doNotGenerateCast
 extern class JSInterceptorMap extends ExtendedMap {
-  flags: uint8;
-  @ifnot(TAGGED_SIZE_8_BYTES) extended_padding[2]: uint8;
-  @if(TAGGED_SIZE_8_BYTES) extended_padding[6]: uint8;
   named_interceptor: InterceptorInfo;
   indexed_interceptor: InterceptorInfo;
   // This prototype validity cell guards modifications of the interceptor's

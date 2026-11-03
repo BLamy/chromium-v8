@@ -123,7 +123,11 @@ namespace internal {
     "First argument to % must not be a regular expression")                    \
   T(FunctionBind, "Bind must be called on a function")                         \
   T(GeneratorRunning, "Generator is already running")                          \
-  T(IllegalInvocation, "Illegal invocation")                                   \
+  T(IllegalInvocation,                                                         \
+    "Illegal invocation: function called with incorrect `this` reference. "    \
+    "See "                                                                     \
+    "https://developers.cloudflare.com/workers/observability/errors/"          \
+    "#illegal-invocation-errors for details.")                                 \
   T(ImmutablePrototypeSet,                                                     \
     "Immutable prototype object '%' cannot have their prototype set")          \
   T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \

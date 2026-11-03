@@ -110,7 +110,7 @@ v8_config = rule(
 
 def _default_args():
     return struct(
-        deps = [":define_flags", "@libcxx//:libc++"],
+        deps = [":define_flags"],
         defines = select({
             "@v8//bazel/config:is_windows": [
                 "UNICODE",
@@ -138,6 +138,24 @@ def _default_args():
                 "-Wno-deprecated-copy",
                 "-Wno-non-virtual-dtor",
                 "-isystem .",
+            ],
+            "@v8//bazel/config:is_windows": [
+                ## From BUILD.gn: `if (is_win)`
+                "/wd4245",
+                "/wd4267",
+                "/wd4324",
+                "/wd4701",
+                "/wd4702",
+                "/wd4703",
+                "/wd4709",
+                "/wd4714",
+                "/wd4715",
+                "/wd4718",
+                "/wd4723",
+                "/wd4724",
+                "/wd4800",
+                ## From BUILD.icu
+                "/wd4005",
             ],
             "//conditions:default": [],
         }) + select({
@@ -189,16 +207,26 @@ def _default_args():
             ],
             "//conditions:default": [
             ],
+        }) + select({
+            "@v8//bazel/config:is_compiler_clang_cl": [
+                "-Wno-invalid-offsetof",
+            ],
+            "//conditions:default": [],
         }),
         includes = ["include"],
         linkopts = select({
             "@v8//bazel/config:is_windows": [
+                # Increase the initial stack size. The default is 1MB, this is 2MB. This
+                # applies only to executables and shared libraries produced by V8 since
+                # ldflags are not pushed to dependants.
+                "/STACK:2097152",
                 "Winmm.lib",
                 "DbgHelp.lib",
                 "Advapi32.lib",
+                "Shell32.lib",
             ],
             "@v8//bazel/config:is_macos": ["-pthread"],
-            "//conditions:default": ["-Wl,--no-as-needed -ldl -latomic -pthread"],
+            "//conditions:default": ["-Wl,--no-as-needed -ldl -pthread"],
         }) + select({
             ":should_add_rdynamic": ["-rdynamic"],
             "//conditions:default": [],
@@ -280,6 +308,8 @@ def v8_library(
         icu_srcs = [],
         icu_deps = [],
         icu_defines = [],
+        noicu_implementation_deps = [],
+        icu_implementation_deps = [],
         **kwargs):
     default = _default_args()
     if _should_emit_noicu_and_icu(noicu_srcs, noicu_deps, noicu_defines, icu_srcs, icu_deps, icu_defines):
@@ -287,11 +317,11 @@ def v8_library(
             name = name + "_noicu",
             srcs = srcs + noicu_srcs,
             deps = deps + noicu_deps + default.deps,
+            implementation_deps = noicu_implementation_deps,
             includes = includes + ["noicu/"] + default.includes,
             copts = copts + default.copts,
             linkopts = linkopts + default.linkopts,
             alwayslink = 1,
-            linkstatic = 1,
             **kwargs
         )
 
@@ -306,11 +336,11 @@ def v8_library(
             name = name + "_icu",
             srcs = srcs + icu_srcs,
             deps = deps + icu_deps + default.deps,
+            implementation_deps = icu_implementation_deps,
             includes = includes + ["icu/"] + default.includes,
             copts = copts + default.copts + ENABLE_I18N_SUPPORT_DEFINES,
             linkopts = linkopts + default.linkopts,
             alwayslink = 1,
-            linkstatic = 1,
             **kwargs
         )
 
@@ -330,9 +360,17 @@ def v8_library(
             copts = copts + default.copts,
             linkopts = linkopts + default.linkopts,
             alwayslink = 1,
-            linkstatic = 1,
             **kwargs
         )
+
+def get_cfg():
+    # Setting the configuration to "target" allows us to avoid compiling code used in both V8 and a
+    # generator tool twice. For cross-compilation this would need to be set to "exec" manually.
+    # Unfortunately bazel makes it very difficult to set the configuration at build time as macros
+    # are resolved before select() can be resolved based on the command line. This could
+    # alternatively be done by defining build targets and the rules used to declare them twice
+    # (once for exec and for target).
+    return "target"
 
 def _v8_target_cpu_transition_impl(settings,
                                    attr, # @unused
@@ -404,13 +442,16 @@ _v8_mksnapshot = rule(
             mandatory = True,
             allow_files = True,
             executable = True,
-            cfg = "exec",
+            cfg = get_cfg(),
         ),
         "target_os": attr.string(mandatory = True),
         "prefix": attr.string(mandatory = True),
         "suffix": attr.string(mandatory = True),
     },
-    cfg = v8_target_cpu_transition,
+    # This allows specifying a CPU architecture on the command line to be used when compiling
+    # mksnapshot. Disable this functionality as we do not use it and it makes cfg changes more
+    # difficult.
+    # cfg = v8_target_cpu_transition,
 )
 
 def v8_mksnapshot(name, args, suffix = ""):
@@ -855,3 +896,34 @@ def v8_build_config(name, arch):
         outs = ["icu/" + name + ".json"],
         cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
     )
+
+# Clone of genrule, but set up to compile for target configuration. Use with care, this may not
+# support all features of genrule(), but is sufficient for this use case.
+# Derived from the tensorflow project, see workerd build/run_binary_target.bzl for details.
+def _genrule_target_impl(ctx):
+    tool = ctx.attr.tool[DefaultInfo].files_to_run.executable
+    flags = [ ctx.expand_location(a) if "$(location" in a else a for a in ctx.attr.args ]
+
+    cmd = " ".join([tool.path] + flags)
+    ctx.actions.run_shell(
+        inputs = ctx.files.srcs,
+        outputs = ctx.outputs.outs,
+        tools = [tool],
+        use_default_shell_env = True,
+        command = cmd,
+    )
+
+genrule_target = rule(
+    implementation = _genrule_target_impl,
+    output_to_genfiles = True,
+    attrs = {
+        "outs": attr.output_list(mandatory = True),
+        "srcs": attr.label_list(allow_files = True),
+        "args": attr.string_list(),
+        "tool": attr.label(
+            executable = True,
+            cfg = get_cfg(),
+            mandatory = True
+        ),
+    },
+)

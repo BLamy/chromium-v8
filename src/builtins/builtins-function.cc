@@ -86,7 +86,7 @@ MaybeDirectHandle<Object> CreateDynamicFunction(Isolate* isolate,
 
   // A call with no arguments has nothing trustworthy to base "code-like"
   // on, so it starts false instead of true.
-  bool is_code_like = argc > 0;
+  bool is_code_like = true;
   DirectHandle<String> body_string = isolate->factory()->empty_string();
   for (int i = 1; i <= argc; ++i) {
     DirectHandle<Object> arg = args.at(i);

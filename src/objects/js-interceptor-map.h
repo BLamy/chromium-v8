@@ -42,8 +42,6 @@ V8_OBJECT class JSInterceptorMap : public ExtendedMap {
   inline void init_flags_and_clear_extended_padding();
 
  public:
-  uint8_t flags_;
-  uint8_t extended_padding_[kTaggedSize - 2];
   TaggedMember<InterceptorInfo> named_interceptor_;
   TaggedMember<InterceptorInfo> indexed_interceptor_;
   TaggedMember<Cell> fast_case_validity_cell_;

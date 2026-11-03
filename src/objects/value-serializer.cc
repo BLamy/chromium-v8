@@ -313,6 +313,7 @@ ValueSerializer::ValueSerializer(
     : isolate_(isolate),
       delegate_(delegate),
       zone_(isolate->allocator(), ZONE_NAME),
+      version_(kLatestVersion),
       id_map_(isolate->heap(), ZoneAllocationPolicy(&zone_)),
       array_buffer_transfer_map_(isolate->heap(), ZoneAllocationPolicy(&zone_)),
       share_immutable_array_buffer_(share_immutable_array_buffer) {
@@ -338,13 +339,29 @@ ValueSerializer::~ValueSerializer() {
   }
 }
 
+Maybe<bool> ValueSerializer::SetWriteVersion(uint32_t version) {
+  if (version < 13 || version > kLatestVersion) {
+    return ThrowDataCloneError(MessageTemplate::kDataCloneError);
+  }
+  version_ = version;
+  return Just(true);
+}
+
 void ValueSerializer::WriteHeader() {
   WriteTag(SerializationTag::kVersion);
-  WriteVarint(kLatestVersion);
+  WriteVarint(version_);
 }
 
 void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
   treat_array_buffer_views_as_host_objects_ = mode;
+}
+
+void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+  treat_functions_as_host_objects_ = mode;
+}
+
+void ValueSerializer::SetTreatProxiesAsHostObjects(bool mode) {
+  treat_proxies_as_host_objects_ = mode;
 }
 
 void ValueSerializer::WriteTag(SerializationTag tag) {
@@ -626,13 +643,22 @@ Maybe<bool> ValueSerializer::WriteJSReceiver(
 
   // Eliminate callable and exotic objects, which should not be serialized.
   InstanceType instance_type = receiver->map()->instance_type();
-  if (IsCallable(*receiver) ||
-      (IsSpecialReceiverInstanceType(instance_type) &&
+  if (IsCallable(*receiver)) {
+    if (treat_functions_as_host_objects_) {
+      return WriteHostObject(receiver);
+    }
+    return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
+  } else if (instance_type == JS_PROXY_TYPE) {
+    if (treat_proxies_as_host_objects_) {
+      return WriteHostObject(receiver);
+    }
+    return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
+  } else if (IsSpecialReceiverInstanceType(instance_type) &&
        instance_type != JS_SPECIAL_API_OBJECT_TYPE
 #if V8_ENABLE_WEBASSEMBLY
        && instance_type != WASM_STRUCT_TYPE && instance_type != WASM_ARRAY_TYPE
 #endif
-       )) {
+       ) {
     return ThrowDataCloneError(MessageTemplate::kDataCloneError, receiver);
   }
 
@@ -1148,10 +1174,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
   WriteVarint(static_cast<uint8_t>(tag));
   WriteVarint<size_t>(view->byte_offset());
   WriteVarint<size_t>(view->byte_length());
-  uint32_t flags =
-      JSArrayBufferViewIsLengthTracking::encode(view->is_length_tracking()) |
-      JSArrayBufferViewIsBackedByRab::encode(view->is_backed_by_rab());
-  WriteVarint(flags);
+  if (version_ >= 14) {
+    uint32_t flags =
+        JSArrayBufferViewIsLengthTracking::encode(view->is_length_tracking()) |
+        JSArrayBufferViewIsBackedByRab::encode(view->is_backed_by_rab());
+    WriteVarint(flags);
+  }
   return ThrowIfOutOfMemory();
 }
 
@@ -1303,7 +1331,7 @@ Maybe<bool> ValueSerializer::WriteSharedObject(
   return ThrowIfOutOfMemory();
 }
 
-Maybe<bool> ValueSerializer::WriteHostObject(DirectHandle<JSObject> object) {
+Maybe<bool> ValueSerializer::WriteHostObject(DirectHandle<JSReceiver> object) {
   WriteTag(SerializationTag::kHostObject);
   if (!delegate_) {
     isolate_->Throw(*isolate_->factory()->NewError(

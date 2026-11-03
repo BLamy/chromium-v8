@@ -271,6 +271,7 @@ selects.config_setting_group(
     match_all = [
         ":is_windows",
         ":is_x64",
+        ":is_compiler_default",
     ],
 )
 
@@ -279,6 +280,7 @@ selects.config_setting_group(
     match_all = [
         ":is_windows",
         ":is_ia32",
+        ":is_compiler_default",
     ],
 )
 
@@ -287,6 +289,34 @@ selects.config_setting_group(
     match_all = [
         ":is_windows",
         ":is_arm64",
+        ":is_compiler_default",
+    ],
+)
+
+selects.config_setting_group(
+    name = "is_windows_clang_asm_x64",
+    match_all = [
+        ":is_windows",
+        ":is_x64",
+        ":is_compiler_clang_cl",
+    ],
+)
+
+selects.config_setting_group(
+    name = "is_windows_clang_asm_ia32",
+    match_all = [
+        ":is_windows",
+        ":is_ia32",
+        ":is_compiler_clang_cl",
+    ],
+)
+
+selects.config_setting_group(
+    name = "is_windows_clang_asm_arm64",
+    match_all = [
+        ":is_windows",
+        ":is_arm64",
+        ":is_compiler_clang_cl",
     ],
 )
 
@@ -317,6 +347,13 @@ config_setting(
     name = "is_compiler_clang",
     flag_values = {
         "@bazel_tools//tools/cpp:compiler": "clang",
+    },
+)
+
+config_setting(
+    name = "is_compiler_clang_cl",
+    flag_values = {
+        "@bazel_tools//tools/cpp:compiler": "clang-cl",
     },
 )
 

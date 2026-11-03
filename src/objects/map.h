@@ -1259,7 +1259,7 @@ static_assert(offsetof(Map, instance_type_) ==
               Internals::kMapInstanceTypeOffset);
 
 // Base class for Maps with extra fields. Subclasses must be defined with
-// @hasSameInstanceTypeAsParent and define padding fields up to kTaggedSize.
+// @hasSameInstanceTypeAsParent.
 V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
   V8_IT_REUSE_PARENT;
 
@@ -1292,7 +1292,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
   static const int kStartOfStrongExtendedFieldsOffset;
 
   std::atomic<BitsEx> bit_field_ex_;
-  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
+  // Keep the non-tagged fields in one kTaggedSize slot so subclasses begin at
+  // tagged alignment.
+  uint8_t flags_;
+  uint8_t extended_padding_[kTaggedSize - 2];
 } V8_OBJECT_END;
 
 constexpr int ExtendedMapSizeForKind(ExtendedMapKind kind);

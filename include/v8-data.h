@@ -67,6 +67,15 @@ class V8_EXPORT Data {
    */
   bool IsCppHeapExternal() const;
 
+  /**
+   * Returns true if this data can be used in |isolate|. Smis can be used in
+   * any isolate, objects in read-only or writable shared space in any isolate
+   * of their isolate group, and all other objects only in the isolate whose
+   * heap holds them. The check reads only the object's page header, so it can
+   * be made without entering the isolate that owns the object.
+   */
+  bool IsCompatibleWithIsolate(const Isolate* isolate) const;
+
  private:
   Data() = delete;
 };

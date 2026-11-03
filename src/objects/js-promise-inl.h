@@ -29,6 +29,12 @@ void JSPromise::set_reactions_or_result(
   reactions_or_result_.store(this, value, mode);
 }
 
+Tagged<Object> JSPromise::context_tag() const { return context_tag_.load(); }
+
+void JSPromise::set_context_tag(Tagged<Object> value, WriteBarrierMode mode) {
+  context_tag_.store(this, value, mode);
+}
+
 JSPromise::Flags JSPromise::flags() const { return flags_.load(); }
 
 void JSPromise::set_flags(Flags value) { flags_.store(value); }

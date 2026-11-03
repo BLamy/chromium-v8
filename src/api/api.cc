@@ -79,6 +79,7 @@
 #include "src/heap/heap-inl.h"
 #include "src/heap/heap-layout-inl.h"
 #include "src/heap/heap-write-barrier.h"
+#include "src/heap/memory-chunk-inl.h"
 #include "src/heap/safepoint.h"
 #include "src/heap/visit-object.h"
 #include "src/init/bootstrapper.h"
@@ -904,6 +905,23 @@ bool Data::IsContext() const {
 
 bool Data::IsCppHeapExternal() const {
   return IsCppHeapExternalObject(*Utils::OpenDirectHandle(this));
+}
+
+bool Data::IsCompatibleWithIsolate(const Isolate* isolate) const {
+  i::Address value = i::ValueHelper::ValueAsAddress(this);
+  if (!i::Internals::HasHeapObjectTag(value)) return true;
+  const i::Isolate* i_isolate = reinterpret_cast<const i::Isolate*>(isolate);
+#ifdef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+  // Each isolate group has its own pointer compression cage.
+  constexpr i::Address kCageMask = ~(i::kPtrComprCageBaseAlignment - 1);
+  if ((value & kCageMask) != (i_isolate->cage_base() & kCageMask)) {
+    return false;
+  }
+#endif
+  const i::MemoryChunk* chunk = i::MemoryChunk::FromAddress(value);
+  if (chunk->InReadOnlySpace() || chunk->InWritableSharedSpace()) return true;
+  return i::Isolate::FromHeap(chunk->MetadataNoIsolateCheck()->heap()) ==
+         i_isolate;
 }
 
 void Context::Enter() {
@@ -2073,6 +2091,17 @@ Local<Value> UnboundModuleScript::GetSourceMappingURL() {
   i::Tagged<i::Object> url =
       i::Cast<i::Script>(obj->script())->source_mapping_url();
   return Utils::ToLocal(i::direct_handle(url, i_isolate));
+}
+
+Local<CompileHintsCollector> UnboundModuleScript::GetCompileHintsCollector()
+    const {
+  i::DisallowGarbageCollection no_gc;
+  auto obj = Utils::OpenDirectHandle(this);
+  i::Isolate* i_isolate = i::Isolate::Current();
+  CHECK(i::IsScript(obj->script()));
+  i::DirectHandle<i::Script> script(i::Cast<i::Script>(obj->script()),
+                                    i_isolate);
+  return ToApiHandle<CompileHintsCollector>(script);
 }
 
 MaybeLocal<Value> Script::Run(Local<Context> context) {
@@ -3733,6 +3762,10 @@ ValueSerializer::ValueSerializer(
 
 ValueSerializer::~ValueSerializer() { delete private_; }
 
+Maybe<bool> ValueSerializer::SetWriteVersion(uint32_t version) {
+  return private_->serializer.SetWriteVersion(version);
+}
+
 void ValueSerializer::WriteHeader() { private_->serializer.WriteHeader(); }
 
 void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
@@ -3749,6 +3782,14 @@ ValueSerializer::ReleaseSharedImmutableBackingStores() {
     result.push_back(std::static_pointer_cast<v8::BackingStore>(bs_base));
   }
   return result;
+}
+
+void ValueSerializer::SetTreatFunctionsAsHostObjects(bool mode) {
+  private_->serializer.SetTreatFunctionsAsHostObjects(mode);
+}
+
+void ValueSerializer::SetTreatProxiesAsHostObjects(bool mode) {
+  private_->serializer.SetTreatProxiesAsHostObjects(mode);
 }
 
 Maybe<bool> ValueSerializer::WriteValue(Local<Context> context,
@@ -3871,6 +3912,10 @@ void ValueDeserializer::SetSupportsLegacyWireFormat(
 
 uint32_t ValueDeserializer::GetWireFormatVersion() const {
   return private_->deserializer.GetWireFormatVersion();
+}
+
+void ValueDeserializer::SetWireFormatVersion(uint32_t version) {
+  private_->deserializer.SetWireFormatVersion(version);
 }
 
 MaybeLocal<Value> ValueDeserializer::ReadValue(Local<Context> context) {
@@ -6003,6 +6048,10 @@ int String::Length() const {
 
 bool String::IsOneByte() const {
   return Utils::OpenDirectHandle(this)->IsOneByteRepresentation();
+}
+
+bool String::IsFlat() const {
+  return Utils::OpenDirectHandle(this)->IsFlat();
 }
 
 class ContainsOnlyOneByteHelper {
@@ -10628,6 +10677,14 @@ void Isolate::GetHeapStatistics(HeapStatistics* heap_statistics) {
 #endif  // V8_ENABLE_WEBASSEMBLY
 }
 
+int64_t Isolate::GetExternalMemory() {
+  return reinterpret_cast<i::Isolate*>(this)->heap()->external_memory();
+}
+
+size_t Isolate::GetHeapSize() {
+  return reinterpret_cast<i::Isolate*>(this)->heap()->CommittedMemory();
+}
+
 size_t Isolate::NumberOfHeapSpaces() {
   return i::LAST_SPACE - i::FIRST_SPACE + 1;
 }
@@ -11516,6 +11573,10 @@ DEFINE_ERROR(WasmCompileError, wasm_compile_error)
 DEFINE_ERROR(WasmLinkError, wasm_link_error)
 DEFINE_ERROR(WasmRuntimeError, wasm_runtime_error)
 DEFINE_ERROR(WasmSuspendError, wasm_suspend_error)
+DEFINE_ERROR(EvalError, eval_error)
+DEFINE_ERROR(URIError, uri_error)
+DEFINE_ERROR(AggregateError, aggregate_error)
+DEFINE_ERROR(SuppressedError, suppressed_error)
 DEFINE_ERROR(Error, error)
 
 #undef DEFINE_ERROR
@@ -12781,6 +12842,31 @@ std::string SourceLocation::ToString() const {
   return (std::ostringstream{} << loc_.function_name() << '@'
                                << loc_.file_name() << ':' << loc_.line())
       .str();
+}
+
+void Isolate::SetPromiseCrossContextCallback(
+    PromiseCrossContextCallback callback) {
+  i::Isolate* isolate = reinterpret_cast<i::Isolate*>(this);
+  isolate->set_promise_cross_context_callback(callback);
+}
+
+void Isolate::SetPromiseCrossContextResolveCallback(
+    PromiseCrossContextResolveCallback callback) {
+  i::Isolate* isolate = reinterpret_cast<i::Isolate*>(this);
+  isolate->set_promise_cross_context_resolve_callback(callback);
+}
+
+Isolate::PromiseContextScope::PromiseContextScope(Isolate* isolate,
+                                                  v8::Local<v8::Object> tag)
+    : isolate_(reinterpret_cast<i::Isolate*>(isolate)) {
+  DCHECK(!isolate_->has_promise_context_tag());
+  DCHECK(!tag.IsEmpty());
+  i::Handle<i::Object> handle = Utils::OpenHandle(*tag);
+  isolate_->set_promise_context_tag(handle);
+}
+
+Isolate::PromiseContextScope::~PromiseContextScope() {
+  isolate_->clear_promise_context_tag();
 }
 
 }  // namespace v8

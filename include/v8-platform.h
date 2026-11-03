@@ -1580,7 +1580,7 @@ class Platform {
     return &default_observer;
   }
 
- protected:
+ public:
   /**
    * Default implementation of current wall-clock time in milliseconds
    * since epoch. Useful for implementing |CurrentClockTimeMillis| if

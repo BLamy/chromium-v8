@@ -6263,9 +6263,10 @@ VirtualObject* MaglevReducer<BaseT>::CreateJSPromiseObject() {
   vobj->set(offsetof(JSObject, elements_),
             GetRootConstant(RootIndex::kEmptyFixedArray));
   vobj->set(offsetof(JSPromise, reactions_or_result_), GetSmiConstant(0));
+  vobj->set(JSPromise::kContextTagOffset, GetSmiConstant(0));
   static_assert(v8::Promise::kPending == 0);
   vobj->set(offsetof(JSPromise, flags_), GetSmiConstant(0));
-  static_assert(sizeof(JSPromise) == 5 * kTaggedSize);
+  static_assert(sizeof(JSPromise) == 6 * kTaggedSize);
   for (int offset = sizeof(JSPromise);
        offset < static_cast<int>(sizeof(JSPromise)) +
                     v8::Promise::kEmbedderFieldCount * kEmbedderDataSlotSize;

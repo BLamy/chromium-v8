@@ -97,6 +97,8 @@ class V8_EXPORT UnboundScript : public Data {
   static const int kNoScriptId = 0;
 };
 
+class CompileHintsCollector;
+
 /**
  * A compiled JavaScript module, not yet tied to a Context.
  */
@@ -115,6 +117,13 @@ class V8_EXPORT UnboundModuleScript : public Data {
    * A unique id.
    */
   int ScriptId() const;
+
+  /**
+   * Get a compile hints collector object which we can use later for retrieving
+   * compile hints (= positions of lazy functions which were compiled and
+   * executed) of a module compiled with kProduceCompileHints.
+   */
+  Local<CompileHintsCollector> GetCompileHintsCollector() const;
 
   static const int kNoScriptId = 0;
 };

@@ -165,6 +165,9 @@ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,
   if (IsJSObject(*object)) {  // Shortcut.
     PropertyKey key(isolate, name);
     LookupIterator it(isolate, object, key, LookupIterator::OWN);
+    if (it.state() == LookupIterator::INTERCEPTOR) {
+      return Just(false);
+    }
     return HasProperty(&it);
   }
 

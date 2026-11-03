@@ -1117,6 +1117,24 @@ class V8_EXPORT Isolate {
   int64_t AdjustAmountOfExternalAllocatedMemory(int64_t change_in_bytes);
 
   /**
+   * Gets the current amount of external memory.
+   */
+  int64_t GetExternalMemory();
+
+  /**
+   * Gets the current total size of the heap (internal memory).
+   */
+  size_t GetHeapSize();
+
+  /**
+   * Adjusts external memory without destructor constraints.
+   * This directly calls the internal implementation without the
+   * zero-balance requirement of ExternalMemoryAccounter.
+   * Use when external memory may outlive the isolate.
+   */
+  int64_t AdjustAmountOfExternalAllocatedMemoryImpl(int64_t change_in_bytes);
+
+  /**
    * Returns heap profiler for this isolate. Will return NULL until the isolate
    * is initialized.
    */
@@ -1919,6 +1937,11 @@ class V8_EXPORT Isolate {
    */
   uint64_t GetHashSeed();
 
+  class PromiseContextScope;
+  void SetPromiseCrossContextCallback(PromiseCrossContextCallback callback);
+  void SetPromiseCrossContextResolveCallback(
+      PromiseCrossContextResolveCallback callback);
+
   Isolate() = delete;
   ~Isolate() = delete;
   Isolate(const Isolate&) = delete;
@@ -1937,7 +1960,6 @@ class V8_EXPORT Isolate {
 
   internal::ValueHelper::InternalRepresentationType GetDataFromSnapshotOnce(
       size_t index);
-  int64_t AdjustAmountOfExternalAllocatedMemoryImpl(int64_t change_in_bytes);
 };
 
 void Isolate::SetData(uint32_t slot, void* data) {
@@ -1964,6 +1986,19 @@ MaybeLocal<T> Isolate::GetDataFromSnapshotOnce(size_t index) {
   }
   return {};
 }
+
+class Isolate::PromiseContextScope {
+ public:
+  PromiseContextScope(Isolate* isolate, v8::Local<v8::Object> tag);
+  ~PromiseContextScope();
+  PromiseContextScope(const PromiseContextScope&) = delete;
+  PromiseContextScope(PromiseContextScope&&) = delete;
+  PromiseContextScope& operator=(const PromiseContextScope&) = delete;
+  PromiseContextScope& operator=(PromiseContextScope&&) = delete;
+
+ private:
+  internal::Isolate* isolate_;
+};
 
 }  // namespace v8
 

@@ -642,11 +642,7 @@ IndirectHandle<T> indirect_handle(DirectHandle<T> handle,
 // does not implicitly convert to an IndirectHandle.
 template <typename T>
 class V8_TRIVIAL_ABI DirectHandle :
-#ifdef ENABLE_SLOW_DCHECKS
-    public api_internal::StackAllocated<true>
-#else
     public api_internal::StackAllocated<false>
-#endif
 {
  public:
   V8_INLINE static const DirectHandle null() {

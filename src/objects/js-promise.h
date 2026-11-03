@@ -38,6 +38,10 @@ V8_OBJECT class JSPromise : public JSObjectWithEmbedderSlots {
       Tagged<UnionOf<PromiseReaction, JSAny>> value,
       WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
 
+  inline Tagged<Object> context_tag() const;
+  inline void set_context_tag(Tagged<Object> value,
+                              WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
   // Flags layout.
   struct Flags : BitFieldGroup<Flags, uint32_t> {
     using BitFieldGroup::BitFieldGroup;
@@ -120,11 +124,25 @@ V8_OBJECT class JSPromise : public JSObjectWithEmbedderSlots {
   DECL_PRINTER(JSPromise)
   DECL_VERIFIER(JSPromise)
 
+  // Used by the cross-context settlement deferral: the entire settlement is
+  // deferred to the owning IoContext so that the promise context tag matches
+  // and reactions run in the correct request scope.
+  static void ContinueSettleAndTriggerReactions(
+      Isolate* isolate, DirectHandle<JSPromise> promise,
+      DirectHandle<Object> argument, PromiseReaction::Type type);
+
  public:
   // Smi 0 terminated list of PromiseReaction objects in case the JSPromise
   // was not settled yet, otherwise the result.
   TaggedMember<UnionOf<PromiseReaction, JSAny>> reactions_or_result_;
+  // The context tag (workerd Promise Context Tagging extension).
+  TaggedMember<Object> context_tag_;
   SmiBitFieldMember<Flags> flags_;
+
+  // Back-compat offset constant for the workerd Promise Context Tagging
+  // extension. Defined after the class body, like JSRegExp::kFlagsOffset etc.
+  static const int kContextTagOffset;
+
 
  private:
   // https://tc39.es/ecma262/#sec-triggerpromisereactions
@@ -136,6 +154,9 @@ V8_OBJECT class JSPromise : public JSObjectWithEmbedderSlots {
 
 V8_OBJECT class JSPromiseConstructor : public JSFunctionWithPrototype {
 } V8_OBJECT_END;
+
+inline constexpr int JSPromise::kContextTagOffset =
+    offsetof(JSPromise, context_tag_);
 
 }  // namespace internal
 }  // namespace v8

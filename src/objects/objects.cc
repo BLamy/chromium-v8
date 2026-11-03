@@ -4700,6 +4700,28 @@ Handle<Object> JSPromise::Fulfill(DirectHandle<JSPromise> promise,
   }
 #endif
 
+  // Cross-context check: if the promise belongs to a different request
+  // context, defer the ENTIRE settlement (status update + reaction
+  // triggering) to the owning IoContext. This ensures the promise stays
+  // kPending until settlement runs in the correct context, avoiding the
+  // CHECK(kPending) crash when a cross-context promise is settled while
+  // another request's microtask checkpoint is active.
+  Handle<Object> obj(promise->context_tag(), isolate);
+  bool needs_promise_context_switch =
+      !(*obj == Smi::zero() ||
+        obj.is_identical_to(isolate->promise_context_tag()) ||
+        !isolate->has_promise_context_resolve_callback());
+  if (needs_promise_context_switch) {
+    if (isolate
+            ->RunPromiseCrossContextResolveCallback(
+                reinterpret_cast<v8::Isolate*>(isolate), Cast<JSObject>(obj),
+                promise, value, PromiseReaction::kFulfill)
+            .IsNothing()) {
+      return {};
+    }
+    return isolate->factory()->undefined_value();
+  }
+
   // 1. Assert: The value of promise.[[PromiseState]] is "pending".
   CHECK_EQ(Promise::kPending, promise->status());
 
@@ -4756,6 +4778,25 @@ Handle<Object> JSPromise::Reject(DirectHandle<JSPromise> promise,
   }
   isolate->RunAllPromiseHooks(PromiseHookType::kResolve, promise,
                               isolate->factory()->undefined_value());
+
+  // Cross-context check: if the promise belongs to a different request
+  // context, defer the ENTIRE settlement (status update + reaction
+  // triggering) to the owning IoContext. See JSPromise::Fulfill for details.
+  Handle<Object> obj(promise->context_tag(), isolate);
+  bool needs_promise_context_switch =
+      !(*obj == Smi::zero() ||
+        obj.is_identical_to(isolate->promise_context_tag()) ||
+        !isolate->has_promise_context_resolve_callback());
+  if (needs_promise_context_switch) {
+    if (isolate
+            ->RunPromiseCrossContextResolveCallback(
+                reinterpret_cast<v8::Isolate*>(isolate), Cast<JSObject>(obj),
+                promise, reason, PromiseReaction::kReject)
+            .IsNothing()) {
+      return {};
+    }
+    return isolate->factory()->undefined_value();
+  }
 
   // 1. Assert: The value of promise.[[PromiseState]] is "pending".
   CHECK_EQ(Promise::kPending, promise->status());
@@ -4885,6 +4926,33 @@ MaybeHandle<Object> JSPromise::Resolve(DirectHandle<JSPromise> promise,
 }
 
 // static
+void JSPromise::ContinueSettleAndTriggerReactions(
+    Isolate* isolate, DirectHandle<JSPromise> promise,
+    DirectHandle<Object> argument, PromiseReaction::Type type) {
+  // This runs in the owning IoContext after cross-context settlement deferral.
+  // The promise should still be pending — no other path should have settled it
+  // because the deferral kept it in kPending state.
+  CHECK_EQ(Promise::kPending, promise->status());
+
+  // Extract reactions before overwriting reactions_or_result.
+  DirectHandle<Object> reactions(promise->reactions(), isolate);
+
+  // Set the result.
+  promise->set_reactions_or_result(Cast<JSAny>(*argument));
+
+  if (type == PromiseReaction::kReject) {
+    promise->set_status(Promise::kRejected);
+    if (!promise->has_handler()) {
+      isolate->ReportPromiseReject(Cast<JSPromise>(promise), argument,
+                                   kPromiseRejectWithNoHandler);
+    }
+  } else {
+    promise->set_status(Promise::kFulfilled);
+  }
+
+  TriggerPromiseReactions(isolate, reactions, argument, type);
+}
+
 Handle<Object> JSPromise::TriggerPromiseReactions(
     Isolate* isolate, DirectHandle<Object> reactions,
     DirectHandle<Object> argument, PromiseReaction::Type type) {

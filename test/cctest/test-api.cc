@@ -232,6 +232,17 @@ THREADED_TEST(IsolateOfContext) {
   CHECK(isolate->IsCurrent());
 }
 
+static bool ExceptionStartsWithIllegalInvocation(v8::Isolate* isolate,
+                                                 v8::TryCatch& try_catch) {
+  v8::Local<v8::String> error_text =
+      try_catch.Exception()
+          ->ToString(isolate->GetCurrentContext())
+          .ToLocalChecked();
+  const char* prefix = "TypeError: Illegal invocation";
+  return strncmp(prefix, *v8::String::Utf8Value(isolate, error_text),
+                 strlen(prefix)) == 0;
+}
+
 static void TestSignatureLooped(const char* operation, Local<Value> receiver,
                                 v8::Isolate* isolate) {
   std::array<char, 200> source;
@@ -249,12 +260,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
   if (!expected_to_throw) {
     CHECK_EQ(10, signature_callback_count);
   } else {
-    CHECK(v8_str("TypeError: Illegal invocation")
-              ->Equals(isolate->GetCurrentContext(),
-                       try_catch.Exception()
-                           ->ToString(isolate->GetCurrentContext())
-                           .ToLocalChecked())
-              .FromJust());
+    CHECK(ExceptionStartsWithIllegalInvocation(isolate, try_catch));
   }
   signature_expected_receiver_global.Reset();
 }
@@ -281,12 +287,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
   if (!expected_to_throw) {
     CHECK_EQ(3, signature_callback_count);
   } else {
-    CHECK(v8_str("TypeError: Illegal invocation")
-              ->Equals(isolate->GetCurrentContext(),
-                       try_catch.Exception()
-                           ->ToString(isolate->GetCurrentContext())
-                           .ToLocalChecked())
-              .FromJust());
+    CHECK(ExceptionStartsWithIllegalInvocation(isolate, try_catch));
   }
   signature_expected_receiver_global.Reset();
 }

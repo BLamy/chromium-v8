@@ -550,6 +550,33 @@ using FilterETWSessionByURL2Callback = FilterETWSessionByURLResult (*)(
     Local<Context> context, const std::string& etw_filter_payload);
 #endif  // V8_OS_WIN
 
+/**
+ * PromiseCrossContextCallback is called when following a promise and the
+ * promise's context tag is not strictly equal to the isolate's current
+ * promise context tag.
+ */
+using PromiseCrossContextCallback = MaybeLocal<Promise> (*)(
+    Local<Context> context, Local<Promise> promise, Local<Object> tag);
+
+/**
+ * PromiseCrossContextResolveCallback is called when resolving or rejecting a
+ * pending promise whose context tag is not strictly equal to the isolate's
+ * current promise context tag. The callback is called with the promise to be
+ * resolved, its context tag, and a function that when called, causes the
+ * reactions to the resolved promise to be enqueued. The idea is that the
+ * embedder sets this callback in the case it needs to defer the actual
+ * scheduling of the reactions to the given promise to a later time.
+ * Importantly, when this callback is invoked, the promise is still in
+ * the pending state. The entire settlement (status update, result storage,
+ * and reaction triggering) is deferred to the owning IoContext.
+ */
+using PromiseCrossContextResolveCallback = Maybe<void> (*)(
+    v8::Isolate* isolate, Local<Value> tag, Local<Data> reactions,
+    Local<Value> argument,
+    std::function<void(v8::Isolate* isolate, Local<Data> reactions,
+                       Local<Value> argument)>
+        callback);
+
 }  // namespace v8
 
 #endif  // INCLUDE_V8_ISOLATE_CALLBACKS_H_

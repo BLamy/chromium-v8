@@ -4989,12 +4989,17 @@ Handle<JSPromise> Factory::NewJSPromiseWithoutHook() {
   Handle<JSPromise> promise =
       Cast<JSPromise>(NewJSObject(isolate()->promise_function()));
   DisallowGarbageCollection no_gc;
-  Tagged<JSPromise> raw = *promise;
-  raw->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
-  raw->set_flags(JSPromise::Flags());
+  promise->set_reactions_or_result(Smi::zero(), SKIP_WRITE_BARRIER);
+  if (!isolate()->has_promise_context_tag()) {
+    promise->set_context_tag(Smi::zero(), SKIP_WRITE_BARRIER);
+  } else {
+    promise->set_context_tag(*isolate()->promise_context_tag());
+  }
+
+  promise->set_flags(JSPromise::Flags());
   // TODO(v8) remove once embedder data slots are always zero-initialized.
   InitEmbedderFields(*promise, Smi::zero());
-  DCHECK_EQ(raw->GetEmbedderFieldCount(), v8::Promise::kEmbedderFieldCount);
+  DCHECK_EQ(promise->GetEmbedderFieldCount(), v8::Promise::kEmbedderFieldCount);
   return promise;
 }
 

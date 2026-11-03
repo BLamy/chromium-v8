@@ -158,6 +158,7 @@ RUNTIME_FUNCTION(Runtime_RejectPromise) {
   DirectHandle<Boolean> debug_event = args.at<Boolean>(2);
   DirectHandle<Object> result = JSPromise::Reject(
       promise, reason, Object::BooleanValue(*debug_event, isolate));
+  RETURN_FAILURE_IF_EXCEPTION(isolate);
   if (isolate->debug()->IsRestartFrameScheduled()) {
     return isolate->TerminateExecution();
   }
@@ -244,6 +245,61 @@ RUNTIME_FUNCTION(Runtime_ConstructSuppressedError) {
       ErrorUtils::Construct(isolate, target, new_target, message,
                             isolate->factory()->undefined_value()));
   return *result;
+}
+
+RUNTIME_FUNCTION(Runtime_PromiseContextInit) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  if (!isolate->has_promise_context_tag()) {
+    args.at<JSPromise>(0)->set_context_tag(Smi::zero());
+  } else {
+    CHECK(!IsUndefined(*isolate->promise_context_tag()));
+    args.at<JSPromise>(0)->set_context_tag(*isolate->promise_context_tag());
+  }
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_PromiseContextCheck) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+
+  Handle<JSPromise> promise = args.at<JSPromise>(0);
+
+  // If promise.context_tag() is strict equal to isolate.promise_context_tag(),
+  // or if the promise being checked does not have a context tag, we'll just
+  // return promise directly.
+  Handle<Object> obj(promise->context_tag(), isolate);
+  if (*obj == Smi::zero() ||
+      obj.is_identical_to(isolate->promise_context_tag())) {
+    return *promise;
+  }
+
+  // Otherwise we defer to the PromiseCrossContextCallback. If the callback
+  // has not been set, then it should just return the same promise back here.
+  Handle<JSPromise> result;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
+                                     isolate->RunPromiseCrossContextCallback(
+                                         isolate->native_context(), promise));
+
+  return *result;
+}
+
+RUNTIME_FUNCTION(Runtime_PromiseResolveContextCheck) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  Handle<JSPromise> promise = args.at<JSPromise>(0);
+  // If promise.context_tag() is strict equal to isolate.promise_context_tag(),
+  // or if the promise being checked does not have a context tag, or if the
+  // resolve callback has not been set, we'll just return false here to indicate
+  // that the default handling should be used.
+  Handle<Object> obj(promise->context_tag(), isolate);
+  if (*obj == Smi::zero() ||
+      obj.is_identical_to(isolate->promise_context_tag()) ||
+      !isolate->has_promise_context_resolve_callback()) {
+    return isolate->heap()->ToBoolean(false);
+  }
+
+  return isolate->heap()->ToBoolean(true);
 }
 
 }  // namespace internal

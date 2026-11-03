@@ -66,6 +66,11 @@ class ValueSerializer {
   ValueSerializer& operator=(const ValueSerializer&) = delete;
 
   /*
+   * Instruct the ValueSerializer to write at a specific serializer version.
+   */
+  Maybe<bool> SetWriteVersion(uint32_t version);
+
+  /*
    * Writes out a header, which includes the format version.
    */
   void WriteHeader();
@@ -112,6 +117,24 @@ class ValueSerializer {
   ReleaseSharedImmutableBackingStores() {
     return std::move(shared_immutable_backing_stores_);
   }
+
+  /*
+   * Indicate whether to treat Functions as host objects,
+   * i.e. pass them to Delegate::WriteHostObject. This should not be
+   * called when no Delegate was passed.
+   *
+   * The default is not to treat Functions as host objects.
+   */
+  void SetTreatFunctionsAsHostObjects(bool mode);
+
+  /*
+   * Indicate whether to treat Proxies as host objects,
+   * i.e. pass them to Delegate::WriteHostObject. This should not be
+   * called when no Delegate was passed.
+   *
+   * The default is not to treat Proxies as host objects.
+   */
+  void SetTreatProxiesAsHostObjects(bool mode);
 
  private:
   // Managing allocations of the internal buffer.
@@ -163,8 +186,7 @@ class ValueSerializer {
 #endif  // V8_ENABLE_WEBASSEMBLY
   Maybe<bool> WriteSharedObject(DirectHandle<HeapObject> object)
       V8_WARN_UNUSED_RESULT;
-  Maybe<bool> WriteHostObject(DirectHandle<JSObject> object)
-      V8_WARN_UNUSED_RESULT;
+  Maybe<bool> WriteHostObject(DirectHandle<JSReceiver> object) V8_WARN_UNUSED_RESULT;
 
   /*
    * Reads the specified keys from the object and writes key-value pairs to the
@@ -196,8 +218,11 @@ class ValueSerializer {
   size_t buffer_capacity_ = 0;
   bool has_custom_host_objects_ = false;
   bool treat_array_buffer_views_as_host_objects_ = false;
+  bool treat_functions_as_host_objects_ = false;
+  bool treat_proxies_as_host_objects_ = false;
   bool out_of_memory_ = false;
   Zone zone_;
+  uint32_t version_;
 
   // To avoid extra lookups in the identity map, ID+1 is actually stored in the
   // map (checking if the used identity is zero is the fast way of checking if
@@ -241,6 +266,13 @@ class ValueDeserializer {
    * ReadHeader.
    */
   uint32_t GetWireFormatVersion() const { return version_; }
+
+  /*
+   * Sets the underlying wire format version. Should only be used if there's no
+   * header specifying the wire format version but you're confident you know
+   * what version was used to serialize the data.
+   */
+  void SetWireFormatVersion(uint32_t version) { version_ = version; }
 
   /*
    * Deserializes a V8 object from the buffer.

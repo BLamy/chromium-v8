@@ -14,6 +14,12 @@ extern transitioning runtime PromiseRevokeReject(
 
 extern transitioning runtime PromiseRejectEventFromStack(
     implicit context: Context)(JSPromise, JSAny): JSAny;
+
+extern transitioning runtime PromiseContextCheck(
+    implicit context: Context)(JSPromise): JSPromise;
+
+extern transitioning runtime PromiseResolveContextCheck(
+    implicit context: Context)(JSPromise): JSAny;
 }
 
 // https://tc39.es/ecma262/#sec-promise-abstract-operations
@@ -241,13 +247,16 @@ extern macro PromiseBuiltinsAssembler::
 transitioning builtin RejectPromise(
     implicit context: Context)(promise: JSPromise, reason: JSAny,
     debugEvent: Boolean): JSAny {
+  // Assert: The value of promise.[[PromiseState]] is "pending".
+  dcheck(promise.Status() == PromisePromiseState::kPending);
   const promiseHookFlags = PromiseHookFlags();
 
   // If promise hook is enabled or the debugger is active, let
   // the runtime handle this operation, which greatly reduces
   // the complexity here and also avoids a couple of back and
   // forth between JavaScript and C++ land.
-  if (IsIsolatePromiseHookEnabledOrDebugIsActiveOrHasAsyncEventDelegate(
+  if (ToBoolean(runtime::PromiseResolveContextCheck(promise)) ||
+      IsIsolatePromiseHookEnabledOrDebugIsActiveOrHasAsyncEventDelegate(
           promiseHookFlags) ||
       !promise.HasHandler()) {
     // 7. If promise.[[PromiseIsHandled]] is false, perform
@@ -475,12 +484,14 @@ transitioning macro PerformPromiseThenImpl(
     // PromiseReaction holding both the onFulfilled and onRejected callbacks.
     // Once the {promise} is resolved we decide on the concrete handler to
     // push onto the microtask queue.
+    const delegate = runtime::PromiseContextCheck(promise);
     const promiseReactions =
-        UnsafeCast<(Zero | PromiseReaction)>(promise.reactions_or_result);
+        UnsafeCast<(Zero | PromiseReaction)>(delegate.reactions_or_result);
 
     const reaction = NewPromiseReaction(
         promiseReactions, resultPromiseOrCapability, onFulfilled, onRejected);
-    promise.reactions_or_result = reaction;
+    delegate.reactions_or_result = reaction;
+    delegate.SetHasHandler();
   } else {
     const reactionsOrResult = promise.reactions_or_result;
     let microtask: PromiseReactionJobTask;
@@ -502,8 +513,8 @@ transitioning macro PerformPromiseThenImpl(
         }
       }
     EnqueueMicrotask(handlerContext, microtask);
+    promise.SetHasHandler();
   }
-  promise.SetHasHandler();
 }
 
 transitioning javascript builtin PerformPromiseThenFunction(

@@ -466,7 +466,8 @@ class RootVisitor;
   V(FunctionTemplateInfo, error_stack_getter_fun_template,                  \
     ErrorStackGetterSharedFun)                                              \
   V(FunctionTemplateInfo, error_stack_setter_fun_template,                  \
-    ErrorStackSetterSharedFun)
+    ErrorStackSetterSharedFun)                                              \
+  V(Object, promise_context_tag, PromiseContextTag)
 
 // Entries in this list are limited to Smis and are not visited during GC.
 #define SMI_ROOT_LIST(V)                                                       \

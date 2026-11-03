@@ -167,6 +167,11 @@ class V8_EXPORT ValueSerializer {
   ~ValueSerializer();
 
   /**
+   * Instruct the ValueSerializer to write at a specific serializer version.
+   */
+  Maybe<bool> SetWriteVersion(uint32_t version);
+
+  /**
    * Writes out a header, which includes the format version.
    */
   void WriteHeader();
@@ -213,6 +218,24 @@ class V8_EXPORT ValueSerializer {
    */
   std::vector<std::shared_ptr<v8::BackingStore>>
   ReleaseSharedImmutableBackingStores();
+
+  /**
+   * Indicate whether to treat Functions as host objects,
+   * i.e. pass them to Delegate::WriteHostObject. This should not be
+   * called when no Delegate was passed.
+   *
+   * The default is not to treat Functions as host objects.
+   */
+  void SetTreatFunctionsAsHostObjects(bool mode);
+
+  /**
+   * Indicate whether to treat Proxies as host objects,
+   * i.e. pass them to Delegate::WriteHostObject. This should not be
+   * called when no Delegate was passed.
+   *
+   * The default is not to treat Proxies as host objects.
+   */
+  void SetTreatProxiesAsHostObjects(bool mode);
 
   /**
    * Write raw data in various common formats to the buffer.
@@ -322,6 +345,13 @@ class V8_EXPORT ValueDeserializer {
    * ReadHeader.
    */
   uint32_t GetWireFormatVersion() const;
+
+  /**
+   * Sets the underlying wire format version. Should only be used if there's no
+   * header specifying the wire format version but you're confident you know
+   * what version was used to serialize the data.
+   */
+  void SetWireFormatVersion(uint32_t version);
 
   /**
    * Reads raw data in various common formats to the buffer.

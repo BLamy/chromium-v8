@@ -129,6 +129,36 @@ bool Isolate::is_javascript_execution_allowed() const {
          javascript_execution_dump();
 }
 
+Handle<Object> Isolate::promise_context_tag() {
+  return root_handle(RootIndex::kPromiseContextTag);
+}
+
+bool Isolate::has_promise_context_tag() {
+  return heap()->promise_context_tag() != ReadOnlyRoots(this).the_hole_value();
+}
+
+void Isolate::clear_promise_context_tag() {
+  heap()->set_promise_context_tag(ReadOnlyRoots(this).the_hole_value());
+}
+
+void Isolate::set_promise_context_tag(Handle<Object> tag) {
+  heap()->set_promise_context_tag(*tag);
+}
+
+void Isolate::set_promise_cross_context_callback(
+    PromiseCrossContextCallback callback) {
+  promise_cross_context_callback_ = callback;
+}
+
+void Isolate::set_promise_cross_context_resolve_callback(
+    PromiseCrossContextResolveCallback callback) {
+  promise_cross_context_resolve_callback_ = callback;
+}
+
+bool Isolate::has_promise_context_resolve_callback() {
+  return promise_cross_context_resolve_callback_ != nullptr;
+}
+
 #ifdef DEBUG
 Tagged<Object> Isolate::VerifyBuiltinsResult(Tagged<Object> result) {
   if (is_execution_terminating() && !v8_flags.strict_termination_checks) {

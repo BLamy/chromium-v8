@@ -1115,10 +1115,12 @@ Reduction JSCreateLowering::ReduceJSCreatePromise(Node* node) {
   a.Store(AccessBuilder::ForJSObjectOffset(
               offsetof(JSPromise, reactions_or_result_)),
           jsgraph()->ZeroConstant());
+  a.Store(AccessBuilder::ForJSObjectOffset(JSPromise::kContextTagOffset),
+          jsgraph()->ZeroConstant());
   static_assert(v8::Promise::kPending == 0);
   a.Store(AccessBuilder::ForJSObjectOffset(offsetof(JSPromise, flags_)),
           jsgraph()->ZeroConstant());
-  static_assert(sizeof(JSPromise) == 5 * kTaggedSize);
+  static_assert(sizeof(JSPromise) == 6 * kTaggedSize);
   for (int offset = static_cast<int>(sizeof(JSPromise));
        offset < static_cast<int>(sizeof(JSPromise)) +
                     v8::Promise::kEmbedderFieldCount * kEmbedderDataSlotSize;

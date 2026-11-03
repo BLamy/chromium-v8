@@ -1031,6 +1031,7 @@ void JSPromise::JSPromisePrint(std::ostream& os) {
   }
   os << "\n - has_handler: " << has_handler();
   os << "\n - is_silent: " << is_silent();
+  os << "\n - context_tag: " << Brief(context_tag());
   JSObjectPrintBody(os, this);
 }
 

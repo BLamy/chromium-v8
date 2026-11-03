@@ -8,6 +8,9 @@
 namespace runtime {
 extern transitioning runtime PromiseHookInit(
     implicit context: Context)(Object, Object): JSAny;
+
+extern transitioning runtime PromiseContextInit(
+    implicit context: Context)(JSPromise): JSAny;
 }
 
 // https://tc39.es/ecma262/#sec-promise-constructor
@@ -62,6 +65,7 @@ transitioning javascript builtin PromiseConstructor(
     result = UnsafeCast<JSPromise>(
         FastNewObject(context, promiseFun, UnsafeCast<JSReceiver>(newTarget)));
     PromiseInit(result);
+    runtime::PromiseContextInit(result);
     RunAnyPromiseHookInit(result, Undefined);
   }
 

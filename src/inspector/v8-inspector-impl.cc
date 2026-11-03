@@ -68,7 +68,7 @@ V8InspectorImpl::V8InspectorImpl(v8::Isolate* isolate,
       m_client(client),
       m_debugger(new V8Debugger(isolate, this)),
       m_lastExceptionId(0),
-      m_lastContextId(0) {
+      m_lastContextId(static_cast<int32_t>(generateUniqueId() & 0x1fff'ffe0)) {
   v8::debug::SetInspector(m_isolate, this);
   v8::debug::SetConsoleDelegate(m_isolate, console());
   v8::debug::SetIsolateId(m_isolate, generateUniqueId());

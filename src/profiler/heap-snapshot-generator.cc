@@ -2543,6 +2543,8 @@ void V8HeapExplorer::ExtractJSPromiseReferences(HeapEntry* entry,
   SetInternalReference(entry, "reactions_or_result",
                        promise->reactions_or_result(),
                        offsetof(JSPromise, reactions_or_result_));
+  SetInternalReference(entry, "context_tag", promise->context_tag(),
+                       JSPromise::kContextTagOffset);
 }
 
 void V8HeapExplorer::ExtractJSGeneratorObjectReferences(

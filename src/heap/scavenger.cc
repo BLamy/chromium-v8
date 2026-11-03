@@ -2156,14 +2156,16 @@ SlotCallbackResult Scavenger::EvacuateThinString(
                     std::is_same_v<THeapObjectSlot, HeapObjectSlot>,
                 "Only FullHeapObjectSlot and HeapObjectSlot are expected here");
   if (shortcut_strings_) {
-    // The ThinString should die after Scavenge, so avoid writing the proper
-    // forwarding pointer and instead just signal the actual object as forwarded
-    // reference.
+    // The ThinString dies after Scavenge, so point the slot at the actual
+    // string.
     Tagged<String> actual = object->actual();
     // ThinStrings always refer to internalized strings, which are always in old
     // space.
     DCHECK(!HeapLayout::InYoungGeneration(actual));
     UpdateHeapObjectReferenceSlot(slot, actual);
+    // Record the forwarding address too, so weak handles processed after the
+    // scavenge are updated to the actual string instead of cleared.
+    object->set_map_word_forwarded(actual, kRelaxedStore);
     return REMOVE_SLOT;
   }
 

@@ -165,6 +165,11 @@ class V8_EXPORT String : public Name {
    */
   bool ContainsOnlyOneByte() const;
 
+  /**
+   * Returns true if this string is flat
+   */
+  bool IsFlat() const;
+
   struct WriteFlags {
     enum {
       kNone = 0,

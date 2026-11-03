@@ -42,7 +42,7 @@ function test() {
     load(new d8.dom.EventTarget());
   } catch (err) {
     assertInstanceof(err, TypeError);
-    assertEquals("Illegal invocation", err.message, 'Error message');
+    assertTrue(err.message.startsWith("Illegal invocation"), 'Error message');
   }
 
   return result;

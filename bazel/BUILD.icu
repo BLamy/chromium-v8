@@ -1,6 +1,12 @@
 # Copyright 2021 the V8 project authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+exports_files([
+    "common/icudtl.dat",
+    "tzres/zoneinfo64.res",
+])
 
 filegroup(
     name = "icudata",
@@ -54,7 +60,7 @@ cc_library(
         "U_ICUDATAENTRY_IN_COMMON",
     ],
     tags = ["requires-rtti"],
-    alwayslink = 1,
+    alwayslink = 0,
 )
 
 cc_library(
@@ -78,7 +84,7 @@ cc_library(
         "U_I18N_IMPLEMENTATION",
     ],
     deps = [":icuuc"],
-    alwayslink = 1,
+    alwayslink = 0,
 )
 
 cc_library(

@@ -11,6 +11,7 @@
 
 #include "v8-data.h"               // NOLINT(build/include_directory)
 #include "v8-exception.h"          // NOLINT(build/include_directory)
+#include "v8-fast-api-calls.h"     // NOLINT(build/include_directory)
 #include "v8-function-callback.h"  // NOLINT(build/include_directory)
 #include "v8-local-handle.h"       // NOLINT(build/include_directory)
 #include "v8-object.h"             // NOLINT(build/include_directory)
@@ -18,7 +19,6 @@
 
 namespace v8 {
 
-class CFunction;
 class FunctionTemplate;
 class ObjectTemplate;
 class Signature;

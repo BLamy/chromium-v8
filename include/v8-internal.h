@@ -1017,7 +1017,7 @@ class Internals {
   // AccessorInfo::data and InterceptorInfo::data field.
   static const int kCallbackInfoDataOffset = 1 * kApiTaggedSize;
 
-  static const uint32_t kNumIsolateDataSlots = 4;
+  static const uint32_t kNumIsolateDataSlots = 6;
   static const int kStackGuardSize = 8 * kApiSystemPointerSize;
   static const int kNumberOfBooleanFlags = 6;
   static const int kErrorMessageParamSize = 1;

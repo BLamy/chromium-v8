@@ -403,7 +403,12 @@ path. Add it with -I<path> to the command line
          && !defined(_WIN32)))                         /* not on windows */    \
      && !defined(COMPONENT_BUILD)                      /* no component build */\
      && __clang_major__ >= 17                          /* clang >= 17 */
+// Clang <= 21 can also overwrite a live preserved register in x86 function
+// epilogues (https://github.com/llvm/llvm-project/pull/156817). This manifests
+// under the Windows x64 ABI, so require clang >= 22 there.
+#if !defined(_WIN32) || __clang_major__ >= 22
 # define V8_HAS_ATTRIBUTE_PRESERVE_MOST (__has_attribute(preserve_most))
+#endif
 #endif
 # define V8_HAS_ATTRIBUTE_VISIBILITY (__has_attribute(visibility))
 # define V8_HAS_ATTRIBUTE_WARN_UNUSED_RESULT \

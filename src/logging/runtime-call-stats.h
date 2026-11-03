@@ -220,7 +220,11 @@ namespace v8::internal {
   V(WeakMap_Delete)                                        \
   V(WeakMap_Get)                                           \
   V(WeakMap_New)                                           \
-  V(WeakMap_Set)
+  V(WeakMap_Set)                                           \
+  V(EvalError_New)                                         \
+  V(URIError_New)                                          \
+  V(AggregateError_New)                                    \
+  V(SuppressedError_New)
 
 #define ADD_THREAD_SPECIFIC_COUNTER(V, Prefix, Suffix) \
   V(Prefix##Suffix)                                    \

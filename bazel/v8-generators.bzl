@@ -4,6 +4,8 @@
 
 """Private helpers for V8 generators."""
 
+load(":bazel/defs.bzl", "get_cfg")
+
 visibility("private")
 
 # Use a single generator target for torque definitions and initializers. We can
@@ -120,7 +122,7 @@ _v8_torque_files = rule(
         "tool": attr.label(
             mandatory = True,
             providers = [V8ToolInfo],
-            cfg = "exec",
+            cfg = get_cfg(),
         ),
         "args": attr.string_list(),
         "layout_json": attr.label(

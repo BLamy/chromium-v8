@@ -6498,6 +6498,7 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
     shared_heap_object_cache_.push_back(ReadOnlyRoots(this).undefined_value());
   }
 
+  clear_promise_context_tag();
   InitializeThreadLocal();
 
   // Profiler has to be created after ThreadLocal is initialized
@@ -8714,6 +8715,59 @@ void Isolate::PrintNumberStringCacheStats(const char* comment,
            v8_flags.double_string_cache_size.value());
   }
   PrintF("\n");
+}
+
+class Isolate::PromiseCrossContextCallbackScope {
+ public:
+  PromiseCrossContextCallbackScope(Isolate& isolate) : isolate_(isolate) {
+    DCHECK(!isolate_.in_promise_cross_context_callback_);
+    isolate_.in_promise_cross_context_callback_ = true;
+  }
+  ~PromiseCrossContextCallbackScope() {
+    isolate_.in_promise_cross_context_callback_ = false;
+  }
+
+ private:
+  Isolate& isolate_;
+};
+
+MaybeHandle<JSPromise> Isolate::RunPromiseCrossContextCallback(
+    Handle<NativeContext> context, Handle<JSPromise> promise) {
+  if (promise_cross_context_callback_ == nullptr ||
+      in_promise_cross_context_callback_) {
+    return promise;
+  }
+  PromiseCrossContextCallbackScope callback_scope(*this);
+  CHECK(IsJSReceiver(promise->context_tag()));
+
+  Handle<JSObject> context_tag(Cast<JSObject>(promise->context_tag()), this);
+  v8::Local<v8::Promise> result;
+  API_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
+      this, result,
+      promise_cross_context_callback_(Utils::ToLocal(context),
+                                      v8::Utils::ToLocal(promise),
+                                      v8::Utils::ToLocal(context_tag)),
+      MaybeHandle<JSPromise>());
+
+  return v8::Utils::OpenHandle(*result);
+}
+
+Maybe<void> Isolate::RunPromiseCrossContextResolveCallback(
+    v8::Isolate* isolate, Handle<JSObject> tag, DirectHandle<Object> promise_or_data,
+    DirectHandle<Object> argument, PromiseReaction::Type type) {
+  CHECK(promise_cross_context_resolve_callback_ != nullptr);
+  return promise_cross_context_resolve_callback_(
+      isolate, v8::Utils::ToLocal(tag), v8::Utils::ToLocal(promise_or_data),
+      v8::Utils::ToLocal(argument),
+      [type](v8::Isolate* isolate, v8::Local<v8::Data> promise_data,
+             v8::Local<v8::Value> argument) {
+        // The deferred action runs in the owning IoContext. Settle the promise
+        // and trigger its reactions here, where the context tag matches.
+        JSPromise::ContinueSettleAndTriggerReactions(
+            reinterpret_cast<Isolate*>(isolate),
+            Cast<JSPromise>(Utils::OpenHandle(*promise_data)),
+            Utils::OpenHandle(*argument), type);
+      });
 }
 
 }  // namespace internal

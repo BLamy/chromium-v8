@@ -813,6 +813,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
     masm->movq(value_reg, value);
     masm->EncodeSandboxedPointer(value_reg);
     return value_reg;
+#if V8_ENABLE_SANDBOX
   } else if (rep == MachineRepresentation::kTrustedPointer) {
     // Indirect pointer fields contain an index to a pointer table entry, which
     // is obtained from the referenced object.
@@ -820,6 +821,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
     masm->movl(value_reg, FieldOperand(value, offsetof(ExposedTrustedObject,
                                                        self_trusted_pointer_)));
     return value_reg;
+#endif  // V8_ENABLE_SANDBOX
   }
   return value;
 }
@@ -838,12 +840,14 @@ Register GetTSANValueRegister<std::memory_order_relaxed>(
   if (rep == MachineRepresentation::kSandboxedPointer) {
     // SandboxedPointers need to be encoded.
     masm->EncodeSandboxedPointer(value_reg);
+#if V8_ENABLE_SANDBOX
   } else if (rep == MachineRepresentation::kTrustedPointer) {
     // Indirect pointer fields contain an index to a pointer table entry, which
     // is obtained from the referenced object.
     masm->movl(value_reg,
                FieldOperand(value_reg, offsetof(ExposedTrustedObject,
                                                 self_trusted_pointer_)));
+#endif  // V8_ENABLE_SANDBOX
   }
   return value_reg;
 }
