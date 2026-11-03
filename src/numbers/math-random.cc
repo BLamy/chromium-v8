@@ -61,6 +61,10 @@ Address MathRandom::InitializeAndMaybeRefillCache(Isolate* isolate,
     } else {
       isolate->random_number_generator()->NextBytes(&seed, sizeof(seed));
     }
+    // Other users of the generator act at points that can differ when replaying.
+    if (!recordreplay::AreEventsDisallowed()) {
+      recordreplay::RecordReplayBytes("MathRandomSeed", &seed, sizeof(seed));
+    }
     state.s0 = base::RandomNumberGenerator::MurmurHash3(seed);
     state.s1 = base::RandomNumberGenerator::MurmurHash3(~seed);
     CHECK(state.s0 != 0 || state.s1 != 0);
@@ -79,8 +83,6 @@ Address MathRandom::InitializeAndMaybeRefillCache(Isolate* isolate,
     uint64_t random =
         base::RandomNumberGenerator::XorShift128(&state.s0, &state.s1);
     double value = base::RandomNumberGenerator::ToDouble(random);
-    // Other users of the generator act at points that can differ when replaying.
-    recordreplay::RecordReplayBytes("MathRandom", &value, sizeof(value));
     cache->set(i, value);
   }
   pod->set(0, state);

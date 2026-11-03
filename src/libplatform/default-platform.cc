@@ -17,6 +17,7 @@
 #include "src/libplatform/default-foreground-task-runner.h"
 #include "src/libplatform/default-job.h"
 #include "src/libplatform/default-worker-threads-task-runner.h"
+#include "src/replay/replay.h"
 
 #if defined(V8_ENABLE_PARTITION_ALLOC)
 #include "third_party/partition_alloc/src/partition_alloc/partition_address_space.h"
@@ -161,6 +162,9 @@ void DefaultPlatform::SetTimeFunctionForTesting(
 
 bool DefaultPlatform::PumpMessageLoop(v8::Isolate* isolate,
                                       MessageLoopBehavior wait_for_work) {
+  // What's queued here is V8's own work, mostly the GC's, and depends on when the
+  // GC ran, which isn't part of a recording.
+  replayio::AutoDisallowEvents disallow_events("PumpMessageLoop");
   bool failed_result = wait_for_work == MessageLoopBehavior::kWaitForWork;
   std::shared_ptr<DefaultForegroundTaskRunner> task_runner;
   {

@@ -281,10 +281,10 @@ std::string CommandGetSourceContents(const char* params) {
   DirectHandle<Script> script = entry->script;
 
   // Lines are padded to where the script starts, for scripts that don't start on
-  // the first line of something.
-  Script::PositionInfo info;
-  Script::GetPositionInfo(script, 0, &info);
-  std::string padded(info.line, '\n');
+  // the first line of something. This runs as sources appear while scanning, which
+  // stays the same as the recording by not allocating on the JS heap, as finding
+  // a position would by computing the script's line ends.
+  std::string padded(script->line_offset(), '\n');
   std::unique_ptr<char[]> source = Cast<String>(script->source())->ToCString();
   padded += source.get();
   return "{\"contents\":\"" + JsonEscape(padded.c_str()) +
