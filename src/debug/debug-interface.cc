@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/debug/debug-interface.h"
+#include "src/replay/replay.h"
 
 #include <stdint.h>
 
@@ -1092,11 +1093,16 @@ MaybeLocal<UnboundScript> CompileInspectorScript(Isolate* v8_isolate,
 
 #if V8_ENABLE_WEBASSEMBLY
 void EnterDebuggingForIsolate(Isolate* v8_isolate) {
+  // Wasm isn't debugged on a replay, and going into debugging throws away its
+  // code. The next call would compile again, which reads the clock when the
+  // recording doesn't, and a replay reads values with an inspector session.
+  if (recordreplay::IsRecordingOrReplaying()) return;
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
   i::wasm::GetWasmEngine()->EnterDebuggingForIsolate(isolate);
 }
 
 void LeaveDebuggingForIsolate(Isolate* v8_isolate) {
+  if (recordreplay::IsRecordingOrReplaying()) return;
   i::Isolate* isolate = reinterpret_cast<i::Isolate*>(v8_isolate);
   i::wasm::GetWasmEngine()->LeaveDebuggingForIsolate(isolate);
 }
