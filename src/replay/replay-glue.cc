@@ -99,6 +99,8 @@ struct IsolateGlue {
   v8::Global<v8::Context> context;
   v8::Global<v8::Function> command_callback;
   v8::Global<v8::Function> clear_pause_data_callback;
+  // The progress when pause data was last cleared.
+  uint64_t pause_progress = 0;
 };
 
 std::map<v8::Isolate*, IsolateGlue*>* gGlue;
@@ -260,6 +262,8 @@ void RegisterStackContexts(Isolate* isolate, IsolateGlue* glue) {
 
 }  // namespace
 
+void RecordReplayClearGluePauseData(Isolate* i_isolate);
+
 std::string RecordReplayRunGlueCommand(Isolate* i_isolate, const char* command,
                                        const char* params) {
   v8::Isolate* isolate = reinterpret_cast<v8::Isolate*>(i_isolate);
@@ -269,6 +273,19 @@ std::string RecordReplayRunGlueCommand(Isolate* i_isolate, const char* command,
     return "{\"error\":\"Command callback not installed\"}";
   }
   RegisterStackContexts(i_isolate, glue);
+
+  // In the cloud each pause gets a process of its own, and the engine only clears pause
+  // data around console messages. Here one replay stops at thousands of points, and
+  // what the inspector wraps at each stays alive until it's released.
+  //
+  // The program has run on once progress is up by more than the one a bookmark adds,
+  // which the engine does between reading a console message and asking about what it
+  // read. A replay that's diverged won't run on, and its progress moves with whatever
+  // it evaluates.
+  if (*gProgressCounter > glue->pause_progress + 1 &&
+      !recordreplay::HasDivergedFromRecording()) {
+    RecordReplayClearGluePauseData(i_isolate);
+  }
 
   v8::Local<v8::Context> context = glue->context.Get(isolate);
   v8::Context::Scope context_scope(context);
@@ -293,6 +310,7 @@ void RecordReplayClearGluePauseData(Isolate* i_isolate) {
     return;
   }
   IsolateGlue* glue = iter->second;
+  glue->pause_progress = *gProgressCounter;
   v8::HandleScope handles(isolate);
   v8::Local<v8::Context> context = glue->context.Get(isolate);
   v8::Context::Scope context_scope(context);
