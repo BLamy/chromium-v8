@@ -22,6 +22,7 @@
 #include "src/inspector/v8-runtime-agent-impl.h"
 #include "src/inspector/v8-stack-trace-impl.h"
 #include "src/inspector/v8-value-utils.h"
+#include "src/replay/replay.h"
 #include "src/tracing/trace-event.h"
 #include "src/tracing/trace-id.h"
 
@@ -105,7 +106,12 @@ void V8Debugger::enable() {
   if (m_enableCount++) return;
   v8::HandleScope scope(m_isolate);
   v8::debug::SetDebugDelegate(m_isolate, this);
-  m_isolate->AddNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback, this);
+  // Breaks into the debugger the next time JS runs, which on a replay reads a clock
+  // the recording has no call for and takes it off the recording.
+  if (!v8::recordreplay::IsRecordingOrReplaying()) {
+    m_isolate->AddNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback,
+                                        this);
+  }
   v8::debug::ChangeBreakOnException(m_isolate, v8::debug::NoBreakOnException);
   m_pauseOnExceptionsState = v8::debug::NoBreakOnException;
 #if V8_ENABLE_WEBASSEMBLY
@@ -144,8 +150,10 @@ void V8Debugger::disable() {
   v8::debug::LeaveDebuggingForIsolate(m_isolate);
 #endif  // V8_ENABLE_WEBASSEMBLY
   v8::debug::SetDebugDelegate(m_isolate, nullptr);
-  m_isolate->RemoveNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback,
-                                         m_originalHeapLimit);
+  if (!v8::recordreplay::IsRecordingOrReplaying()) {
+    m_isolate->RemoveNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback,
+                                           m_originalHeapLimit);
+  }
   m_originalHeapLimit = 0;
 }
 

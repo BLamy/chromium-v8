@@ -41,11 +41,19 @@ const gProtocolIdToScope = new Map();
 
 let gNextObjectId = 1;
 
+// The inspector keeps everything it wraps alive until its group is released. Nothing
+// a client was told about one pause means anything at the next, so all of it goes when
+// the replay moves on: the group for what's read here, and the inspector's own for
+// call frames. Without this a replay's heap grows with every read until V8 runs out.
+const ObjectGroup = "replay";
+
 function clearPauseDataCallback() {
   gProtocolIdToObject.clear();
   gObjectIdToProtocolId.clear();
   gProtocolIdToScope.clear();
   gNextObjectId = 1;
+  sendMessage("Runtime.releaseObjectGroup", { objectGroup: ObjectGroup });
+  sendMessage("Runtime.releaseObjectGroup", { objectGroup: "backtrace" });
 }
 
 function remoteObjectToProtocolId(remoteObject) {
@@ -558,11 +566,12 @@ function Pause_evaluateInFrame({ frameId, expression }) {
   return buildProtocolResult(sendMessage("Debugger.evaluateOnCallFrame", {
     callFrameId: frames[index].callFrameId,
     expression,
+    objectGroup: ObjectGroup,
   }));
 }
 
 function Pause_evaluateInGlobal({ expression }) {
-  return buildProtocolResult(sendMessage("Runtime.evaluate", { expression }));
+  return buildProtocolResult(sendMessage("Runtime.evaluate", { expression, objectGroup: ObjectGroup }));
 }
 
 function Pause_getAllFrames() {
