@@ -4778,6 +4778,10 @@ void Isolate::Delete(Isolate* isolate) {
 // static
 void Isolate::Deinitialize(Isolate* isolate) {
   DCHECK_NOT_NULL(isolate);
+  // How much there is to tear down depends on what reads at a pause allocated,
+  // as does what it calls, like the time for each page of the heap. So none of
+  // that can be in a recording, as with a GC.
+  replayio::AutoDisallowEvents disallow_events("Isolate::Deinitialize");
   // v8::V8::Dispose() must only be called after deleting all isolates.
   DCHECK_NOT_NULL(V8::GetCurrentPlatform());
   // Temporarily set this isolate as current so that various parts of
@@ -5093,6 +5097,11 @@ void Isolate::RegisterMicrotaskQueue(MicrotaskQueue* queue) {
 
 void Isolate::Deinit() {
   RecordReplayOnIsolateDispose(this);
+  // On a replay that read something, this has just freed an inspector session,
+  // which enters this isolate as it goes. Deinitialize made it current with no
+  // thread data, so leaving makes no isolate current, and the rest of this needs
+  // one. This puts back what Deinitialize set.
+  SetIsolateThreadLocals(this, nullptr);
   TRACE_ISOLATE(deinit);
 
 #ifdef V8_ENABLE_REGEXP_DIAGNOSTICS
