@@ -446,6 +446,7 @@ bool RecordReplayIgnoreScriptByURL(const char* url) {
   static const char* const kInternalPrefixes[] = {
       "node:",    "node-internal:", "cloudflare:",           "cloudflare-internal:",
       "workerd:", "internal:",      "wasm-instantiate-shim", "v8/",
+      "pyodide:", "pyodide-internal:",
   };
   for (const char* prefix : kInternalPrefixes) {
     if (!strncmp(url, prefix, strlen(prefix))) return true;
