@@ -16481,6 +16481,10 @@ ReduceResult MaglevGraphBuilder::VisitDebugger() {
   return BuildCallRuntime(Runtime::kHandleDebuggerStatement, {});
 }
 
+// Only the interpreter runs when recording or replaying.
+ReduceResult MaglevGraphBuilder::VisitRecordReplayIncExecutionProgressCounter() { UNREACHABLE(); }
+ReduceResult MaglevGraphBuilder::VisitRecordReplayInstrumentation() { UNREACHABLE(); }
+
 ReduceResult MaglevGraphBuilder::VisitIncBlockCounter() {
   ValueNode* closure = GetClosure();
   ValueNode* tagged_closure;

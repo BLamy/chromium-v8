@@ -133,6 +133,7 @@
 #include "src/objects/visitors.h"
 #include "src/profiler/heap-profiler.h"
 #include "src/regexp/regexp.h"
+#include "src/replay/replay.h"
 #include "src/snapshot/embedded/embedded-data.h"
 #include "src/snapshot/serializer-deserializer.h"
 #include "src/snapshot/snapshot.h"
@@ -1188,6 +1189,7 @@ bool GCCallbacksScope::CheckReenter() const {
 }
 
 void Heap::HandleGCRequest() {
+  replayio::AutoDisallowEvents disallow_events("Heap::HandleGCRequest");
   if (IsStressingScavenge() && stress_scavenge_observer_->HasRequestedGC()) {
     CollectGarbage(NEW_SPACE, GarbageCollectionReason::kTesting);
     stress_scavenge_observer_->RequestedGCDone();
@@ -1294,6 +1296,7 @@ void FreeCachesOnMemoryPressure(Isolate* isolate,
 }  // anonymous namespace
 
 void Heap::CollectAllAvailableGarbage(GarbageCollectionReason gc_reason) {
+  replayio::AutoDisallowEvents disallow_events("Heap::CollectAllAvailableGarbage");
   // Min and max number of attempts for GC. The method will continue with more
   // GCs until the root set is stable.
   static constexpr int kMaxNumberOfAttempts = 7;
@@ -1438,6 +1441,7 @@ void Heap::CollectGarbage(
     const v8::GCCallbackFlags gc_callback_flags,
     PerformHeapLimitCheck perform_heap_limit_check,
     PerformIneffectiveMarkCompactCheck check_ineffective_mark_compact) {
+  replayio::AutoDisallowEvents disallow_events("Heap::CollectGarbage");
   CHECK(isolate_->IsOnCentralStack());
   // Any handles that are created during GC (eg during API callbacks)
   // should be in a fresh handle scope that is torn down before the GC
@@ -1818,6 +1822,7 @@ void Heap::StartIncrementalMarking(GCFlags gc_flags,
                                    GCCallbackFlags gc_callback_flags,
                                    GarbageCollector collector,
                                    const char* reason) {
+  replayio::AutoDisallowEvents disallow_events("Heap::StartIncrementalMarking");
   DCHECK(incremental_marking()->IsStopped());
   DCHECK_EQ(isolate(), Isolate::TryGetCurrent());
 
@@ -1940,6 +1945,7 @@ void Heap::StartIncrementalMarkingIfAllocationLimitIsReached(
     LocalHeap* local_heap, GCFlags gc_flags,
     const GCCallbackFlags gc_callback_flags,
     std::optional<GarbageCollectionReason> gc_reason) {
+  replayio::AutoDisallowEvents disallow_events("Heap::StartIncrementalMarkingIfAllocationLimitIsReached");
   if (incremental_marking()->IsStopped() &&
       incremental_marking()->CanAndShouldBeStarted()) {
     auto [limit, reason] = IncrementalMarkingLimitReached();
@@ -2118,6 +2124,7 @@ void Heap::RestoreHeapLimit(size_t heap_limit) {
 
 void Heap::CollectGarbageWithRetry(LocalHeap* local_heap, AllocationSpace space,
                                    GarbageCollectionReason gc_reason) {
+  replayio::AutoDisallowEvents disallow_events("Heap::CollectGarbageWithRetry");
   AllocationType allocation_type;
 
   switch (space) {
@@ -2483,6 +2490,7 @@ void Heap::CompleteSweepingYoung(CompleteSweepingReason reason) {
 }
 
 void Heap::EnsureSweepingCompletedForObject(Tagged<HeapObject> object) {
+  replayio::AutoDisallowEvents disallow_events("Heap::EnsureSweepingCompletedForObject");
   if (!sweeping_in_progress()) return;
 
   MemoryChunk* chunk = MemoryChunk::FromHeapObject(object);
@@ -3649,6 +3657,7 @@ class ActivateMemoryReducerTask : public CancelableTask {
 };
 
 void Heap::ActivateMemoryReducerIfNeeded() {
+  replayio::AutoDisallowEvents disallow_events("Heap::ActivateMemoryReducerIfNeeded");
   if (memory_reducer_ == nullptr) return;
   // This method may be called from any thread. Post a task to run it on the
   // isolate's main thread to avoid synchronization.
@@ -4013,6 +4022,7 @@ class MemoryPressureInterruptTask : public CancelableTask {
 };
 
 void Heap::CheckMemoryPressure() {
+  replayio::AutoDisallowEvents disallow_events("Heap::CheckMemoryPressure");
   if (HighMemoryPressure()) {
     FreeCachesOnMemoryPressure(isolate(),
                                GarbageCollectionReason::kMemoryPressure);
@@ -4035,6 +4045,7 @@ void Heap::CheckMemoryPressure() {
 }
 
 void Heap::CollectGarbageOnMemoryPressure() {
+  replayio::AutoDisallowEvents disallow_events("Heap::CollectGarbageOnMemoryPressure");
   const int kGarbageThresholdInBytes = 8 * MB;
   const double kGarbageThresholdAsFractionOfTotalMemory = 0.1;
   // This constant is the maximum response time in RAIL performance model.
@@ -4071,6 +4082,7 @@ void Heap::CollectGarbageOnMemoryPressure() {
 
 void Heap::MemoryPressureNotification(MemoryPressureLevel level,
                                       bool is_isolate_locked) {
+  replayio::AutoDisallowEvents disallow_events("Heap::MemoryPressureNotification");
   TRACE_EVENT("devtools.timeline,v8", "V8.MemoryPressureNotification", "level",
               static_cast<int>(level));
   MemoryPressureLevel previous =
@@ -5484,6 +5496,7 @@ bool Heap::IsInputHandlingInitialized() const {
 // - or the incremental marking is not in progress and we cannot start it.
 bool Heap::ShouldExpandOldGenerationOnSlowAllocation(LocalHeap* local_heap,
                                                      AllocationOrigin origin) {
+  replayio::AutoDisallowEvents disallow_events("Heap::ShouldExpandOldGenerationOnSlowAllocation");
   if (always_allocate()) {
     return true;
   }
@@ -7566,6 +7579,7 @@ void Heap::FinishSweepingIfOutOfWork(CompleteSweepingReason reason) {
 
 void Heap::EnsureSweepingCompleted(SweepingForcedFinalizationMode mode,
                                    CompleteSweepingReason reason) {
+  replayio::AutoDisallowEvents disallow_events("Heap::EnsureSweepingCompleted");
   TRACE_GC_EPOCH(tracer(), GCTracer::Scope::HEAP_ENSURE_SWEEPING_COMPLETED,
                  ThreadKind::kMain, "value", [&](perfetto::TracedValue ctx) {
                    auto dict = std::move(ctx).WriteDictionary();

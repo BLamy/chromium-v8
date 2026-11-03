@@ -1439,7 +1439,8 @@ BytecodeGenerator::BytecodeGenerator(
       zone_(compile_zone),
       builder_(zone(), info->num_parameters_including_this(),
                info->scope()->num_stack_slots(), info->feedback_vector_spec(),
-               info->SourcePositionRecordingMode()),
+               info->SourcePositionRecordingMode(),
+               info->flags().record_replay_ignore()),
       info_(info),
       ast_string_constants_(ast_string_constants),
       closure_scope_(info->scope()),
@@ -1795,6 +1796,13 @@ void BytecodeGenerator::GenerateBodyPrologue() {
   FunctionLiteral* literal = info()->literal();
   // Emit tracing call if requested to do so.
   if (v8_flags.trace) builder()->CallRuntime(Runtime::kTraceEnter);
+
+  // Entering a function is a point the replay can name. A resumable function's
+  // frame is announced once its generator object exists.
+  builder()->RecordReplayIncExecutionProgressCounter();
+  if (!IsResumableFunction(literal->kind())) {
+    builder()->RecordReplayInstrumentation("main");
+  }
 
   // Increment the function-scope block coverage counter.
   BuildIncrementBlockCoverageCounterIfEnabled(literal, SourceRangeKind::kBody);
@@ -2561,7 +2569,20 @@ void BytecodeGenerator::VisitBreakStatement(BreakStatement* stmt) {
 
 void BytecodeGenerator::VisitReturnStatement(ReturnStatement* stmt) {
   AllocateBlockCoverageSlotIfEnabled(stmt, SourceRangeKind::kContinuation);
-  builder()->SetStatementPosition(stmt);
+  // The record/replay breakpoint goes where the returned expression starts,
+  // rather than at the return keyword.
+  builder()->SetStatementPosition(stmt->position(), true, false);
+  Expression* returned = stmt->expression();
+  if (returned->position() < 0) {
+    builder()->RecordReplayDeferBreakpoint(stmt->position());
+  } else if (returned->IsBinaryOperation()) {
+    // A binary operation's position is its right operand, and a call's own
+    // breakpoint there would then look like a duplicate of this one.
+    builder()->RecordReplayDeferBreakpoint(
+        returned->AsBinaryOperation()->left()->position());
+  } else {
+    builder()->RecordReplayDeferBreakpoint(returned->position());
+  }
   VisitForAccumulatorValue(stmt->expression());
   int return_position = stmt->end_position();
   if (return_position == ReturnStatement::kFunctionLiteralReturnPosition) {
@@ -2972,6 +2993,10 @@ void BytecodeGenerator::BuildTryCatch(
   bool emit_catch = throw_tracker.HasEmittedThrowingBytecode() ||
                     block_coverage_builder_ != nullptr;
   try_control_builder.EndTry(emit_catch);
+
+  // The progress counter advances at catch blocks to tell an exception being
+  // thrown from one being rethrown. See Runtime_UnwindAndFindExceptionHandler.
+  if (emit_catch) builder()->RecordReplayIncExecutionProgressCounter();
 
   if (emit_catch) {
     HoleCheckElisionMergeScope::Branch branch_elider(merge_elider);
@@ -4852,7 +4877,8 @@ void BytecodeGenerator::BuildReturn(int source_position) {
     builder()->StoreAccumulatorInRegister(result).CallRuntime(
         Runtime::kTraceExit, result);
   }
-  builder()->SetStatementPosition(source_position);
+  builder()->SetStatementPosition(source_position, true, false);
+  builder()->RecordReplayInstrumentation("exit");
   builder()->Return();
 }
 
@@ -6120,6 +6146,8 @@ void BytecodeGenerator::BuildSuspendPoint(int position) {
 
   RegisterList registers = register_allocator()->AllLiveRegisters();
 
+  builder()->RecordReplayInstrumentation("exit");
+
   // Save context, registers, and state. This bytecode then returns the value
   // in the accumulator.
   builder()->SetExpressionPosition(position);
@@ -6131,6 +6159,9 @@ void BytecodeGenerator::BuildSuspendPoint(int position) {
   // Clobbers all registers and sets the accumulator to the
   // [[input_or_debug_pos]] slot of the generator object.
   builder()->ResumeGenerator(generator_object(), registers);
+
+  builder()->RecordReplayIncExecutionProgressCounter();
+  builder()->RecordReplayInstrumentation("entry");
 }
 
 void BytecodeGenerator::VisitYield(Yield* expr) {
@@ -6907,6 +6938,8 @@ void BytecodeGenerator::VisitArguments(const ZonePtrList<Expression>* args,
 }
 
 void BytecodeGenerator::VisitCall(Call* expr) {
+  int record_replay_sites_before_call =
+      builder()->record_replay_instrumentation_site_counter_;
   Expression* callee_expr = expr->expression();
   Call::CallType call_type = expr->GetCallType();
 
@@ -7123,6 +7156,19 @@ void BytecodeGenerator::VisitCall(Call* expr) {
   }
 
   builder()->SetExpressionPosition(expr);
+
+  // A record/replay breakpoint for the call, after its arguments. With arguments
+  // that had breakpoints of their own, this goes at the opening parenthesis, which
+  // nothing else uses, so that it's a separate point: `/*1*/f/*3*/(/*2*/g())`.
+  // Otherwise it can be a duplicate of the statement's, and gets dropped.
+  if (expr->call_head_token_position() &&
+      record_replay_sites_before_call !=
+          builder()->record_replay_instrumentation_site_counter_) {
+    builder()->RecordReplayInstrumentation("breakpoint",
+                                           expr->call_head_token_position());
+  } else {
+    builder()->RecordReplayInstrumentation("breakpoint", expr->position());
+  }
 
   if (use_reflect_apply) {
     builder()->CallJSRuntime(Context::REFLECT_APPLY_INDEX, args);
@@ -8875,6 +8921,8 @@ void BytecodeGenerator::BuildGeneratorObjectVariableInitialization() {
       .MoveRegister(builder()->Receiver(), args[1])
       .CallRuntime(function_id, args)
       .StoreAccumulatorInRegister(generator_object());
+
+  builder()->RecordReplayInstrumentation("generator");
 
   if (generator_object_var->location() == VariableLocation::LOCAL) {
     // The generator object register is already set to the variable's local

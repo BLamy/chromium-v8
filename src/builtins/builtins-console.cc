@@ -12,6 +12,7 @@
 #include "src/logging/counters.h"
 #include "src/logging/log.h"
 #include "src/objects/objects-inl.h"
+#include "src/replay/replay-internal.h"
 
 namespace v8 {
 namespace internal {
@@ -149,6 +150,34 @@ enum {
   CONSOLE_CONTEXT_SLOTS,
 };
 
+// Tells the driver about a call that shows something, with the level the protocol
+// gives it. Runs on both sides, as messages are points in the recording.
+void RecordReplayOnConsoleCall(Isolate* isolate,
+                               const internal::BuiltinArguments& args,
+                               const char* method) {
+  if (!recordreplay::IsRecordingOrReplaying() ||
+      !recordreplay::IsMainThread() || recordreplay::AreEventsDisallowed() ||
+      isolate->is_execution_terminating()) {
+    return;
+  }
+  const char* level = nullptr;
+  if (!strcmp(method, "Warn")) {
+    level = "warning";
+  } else if (!strcmp(method, "Error")) {
+    level = "error";
+  } else if (!strcmp(method, "Log") || !strcmp(method, "Info") ||
+             !strcmp(method, "Debug") || !strcmp(method, "Dir") ||
+             !strcmp(method, "DirXml") || !strcmp(method, "Table") ||
+             !strcmp(method, "Trace")) {
+    level = "info";
+  }
+  if (!level) return;
+  RecordReplaySetCurrentConsoleCall(
+      level, const_cast<internal::BuiltinArguments*>(&args));
+  RecordReplayOnConsoleMessage(0);
+  RecordReplaySetCurrentConsoleCall(nullptr, nullptr);
+}
+
 void ConsoleCall(
     Isolate* isolate, const internal::BuiltinArguments& args,
     void (debug::ConsoleDelegate::*func)(const v8::debug::ConsoleCallArguments&,
@@ -193,6 +222,7 @@ void LogTimerEvent(Isolate* isolate, BuiltinArguments args,
 
 #define CONSOLE_BUILTIN_IMPLEMENTATION(call, name)             \
   BUILTIN(Console##call) {                                     \
+    RecordReplayOnConsoleCall(isolate, args, #call);           \
     ConsoleCall(isolate, args, &debug::ConsoleDelegate::call); \
     RETURN_FAILURE_IF_EXCEPTION(isolate);                      \
     return ReadOnlyRoots(isolate).undefined_value();           \
@@ -205,6 +235,7 @@ CONSOLE_METHOD_LIST(CONSOLE_BUILTIN_IMPLEMENTATION)
     if (!Formatter(isolate, args, index)) {                    \
       return ReadOnlyRoots(isolate).exception();               \
     }                                                          \
+    RecordReplayOnConsoleCall(isolate, args, #call);           \
     ConsoleCall(isolate, args, &debug::ConsoleDelegate::call); \
     RETURN_FAILURE_IF_EXCEPTION(isolate);                      \
     return ReadOnlyRoots(isolate).undefined_value();           \

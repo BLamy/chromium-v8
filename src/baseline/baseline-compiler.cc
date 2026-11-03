@@ -3061,6 +3061,10 @@ void BaselineCompiler::VisitDebugger() {
   CallRuntime(Runtime::kHandleDebuggerStatement);
 }
 
+// Only the interpreter runs when recording or replaying.
+void BaselineCompiler::VisitRecordReplayIncExecutionProgressCounter() { UNREACHABLE(); }
+void BaselineCompiler::VisitRecordReplayInstrumentation() { UNREACHABLE(); }
+
 void BaselineCompiler::VisitIncBlockCounter() {
   SaveAccumulatorScope accumulator_scope(this, &basm_);
   CallBuiltin<Builtin::kIncBlockCounter>(

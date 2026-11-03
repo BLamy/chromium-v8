@@ -55,7 +55,19 @@
 #include "src/inspector/v8-stack-trace-impl.h"
 #include "src/inspector/value-mirror.h"
 
+namespace v8 {
+namespace internal {
+void RecordReplayInstallGlue();
+}  // namespace internal
+}  // namespace v8
+
 namespace v8_inspector {
+
+namespace {
+// Record/replay's commands use the inspector. See replay-glue.cc.
+[[maybe_unused]] const bool kRecordReplayGlueInstalled =
+    (v8::internal::RecordReplayInstallGlue(), true);
+}  // namespace
 
 std::unique_ptr<V8Inspector> V8Inspector::create(v8::Isolate* isolate,
                                                  V8InspectorClient* client) {

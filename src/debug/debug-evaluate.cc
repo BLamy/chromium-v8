@@ -558,6 +558,8 @@ bool BytecodeHasNoSideEffect(interpreter::Bytecode bytecode) {
     case Bytecode::kToBoolean:
     // Misc.
     case Bytecode::kIncBlockCounter:  // Coverage counters.
+    case Bytecode::kRecordReplayIncExecutionProgressCounter:
+    case Bytecode::kRecordReplayInstrumentation:
     case Bytecode::kForInEnumerate:
     case Bytecode::kForInPrepare:
     case Bytecode::kForInNext:

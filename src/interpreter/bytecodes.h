@@ -513,6 +513,10 @@ namespace interpreter {
   /* Block Coverage */                                                         \
   V(IncBlockCounter, ImplicitRegisterUse::kNone, OperandType::kCoverageSlot)   \
                                                                                \
+  /* Record Replay */                                                          \
+  V(RecordReplayIncExecutionProgressCounter, ImplicitRegisterUse::kNone)       \
+  V(RecordReplayInstrumentation, ImplicitRegisterUse::kNone, OperandType::kUImm) \
+                                                                               \
   /* Execution Abort (internal error) */                                       \
   V(Abort, ImplicitRegisterUse::kNone, OperandType::kAbortReason)
 

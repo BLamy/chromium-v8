@@ -3289,6 +3289,25 @@ IGNITION_HANDLER(IncBlockCounter, InterpreterAssembler) {
   Dispatch();
 }
 
+// RecordReplayIncExecutionProgressCounter
+//
+// Advance the progress counter that names points in a recording.
+IGNITION_HANDLER(RecordReplayIncExecutionProgressCounter, InterpreterAssembler) {
+  CallRuntime(Runtime::kRecordReplayIncExecutionProgressCounter, GetContext());
+  Dispatch();
+}
+
+// RecordReplayInstrumentation <site>
+//
+// A point the replay engine can look for or stop at.
+IGNITION_HANDLER(RecordReplayInstrumentation, InterpreterAssembler) {
+  TNode<JSFunction> closure = LoadFunctionClosure();
+  TNode<Smi> site = BytecodeOperandUImmSmi(0);
+  CallRuntime(Runtime::kRecordReplayInstrumentation, GetContext(), closure,
+              site);
+  Dispatch();
+}
+
 // ForInEnumerate <receiver>
 //
 // Enumerates the enumerable keys of the |receiver| and either returns the

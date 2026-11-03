@@ -98,6 +98,15 @@ class V8DebuggerAgentImpl : public protocol::Debugger::Backend {
       std::optional<bool> optionalIsRegex,
       std::unique_ptr<protocol::Array<protocol::Debugger::SearchMatch>>*)
       override;
+  Response getCallFrames(
+      std::unique_ptr<protocol::Array<protocol::Debugger::CallFrame>>*
+          out_callFrames) override;
+  Response getFrameLocations(
+      std::optional<double> maxFrames,
+      std::unique_ptr<protocol::Array<protocol::Debugger::Location>>* result)
+      override;
+  Response getPendingException(
+      std::unique_ptr<protocol::Runtime::RemoteObject>* out_exception) override;
   Response getPossibleBreakpoints(
       std::unique_ptr<protocol::Debugger::Location> start,
       std::unique_ptr<protocol::Debugger::Location> end,

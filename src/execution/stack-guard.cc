@@ -22,6 +22,7 @@
 
 #ifdef V8_ENABLE_MAGLEV
 #include "src/maglev/maglev-concurrent-dispatcher.h"
+#include "src/replay/replay.h"
 #endif  // V8_ENABLE_MAGLEV
 
 #if V8_ENABLE_WEBASSEMBLY
@@ -297,6 +298,12 @@ class V8_NODISCARD ShouldBeZeroOnReturnScope final {
 
 Tagged<Object> StackGuard::HandleInterrupts(InterruptLevel level) {
   TRACE_EVENT("v8.execute", "V8.HandleInterrupts");
+
+  // Interrupts have to happen at the same points on both sides, which isn't
+  // somewhere a replay is reading values.
+  if (recordreplay::AreEventsDisallowed()) {
+    return ReadOnlyRoots(isolate_).undefined_value();
+  }
 
 #if DEBUG
   isolate_->heap()->VerifyNewSpaceTop();

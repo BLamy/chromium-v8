@@ -295,6 +295,14 @@ void Script::set_deserialized(bool value) {
   set_flags(DeserializedBit::update(flags(), value));
 }
 
+bool Script::record_replay_instrumented() const {
+  return RecordReplayInstrumentedBit::decode(flags());
+}
+
+void Script::set_record_replay_instrumented(bool value) {
+  set_flags(RecordReplayInstrumentedBit::update(flags(), value));
+}
+
 bool Script::is_repl_mode() const { return IsReplModeBit::decode(flags()); }
 
 void Script::set_is_repl_mode(bool value) {

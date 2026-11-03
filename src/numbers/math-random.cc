@@ -10,6 +10,7 @@
 #include "src/objects/contexts-inl.h"
 #include "src/objects/fixed-array.h"
 #include "src/objects/smi.h"
+#include "src/replay/replay.h"
 
 namespace v8 {
 namespace internal {
@@ -77,7 +78,10 @@ Address MathRandom::InitializeAndMaybeRefillCache(Isolate* isolate,
     // Generate random numbers using xorshift128+.
     uint64_t random =
         base::RandomNumberGenerator::XorShift128(&state.s0, &state.s1);
-    cache->set(i, base::RandomNumberGenerator::ToDouble(random));
+    double value = base::RandomNumberGenerator::ToDouble(random);
+    // Other users of the generator act at points that can differ when replaying.
+    recordreplay::RecordReplayBytes("MathRandom", &value, sizeof(value));
+    cache->set(i, value);
   }
   pod->set(0, state);
 

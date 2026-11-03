@@ -28,6 +28,7 @@
 #include "src/objects/elements.h"
 #include "src/objects/objects-inl.h"
 #include "src/profiler/heap-profiler.h"
+#include "src/replay/replay.h"
 #include "src/sandbox/hardware-support.h"
 #include "src/sandbox/sandbox.h"
 #include "src/sandbox/testing.h"
@@ -175,6 +176,9 @@ base::AbortMode ChooseAbortMode() {
 void V8::Initialize() {
   AdvanceStartupState(V8StartupState::kV8Initializing);
   CHECK(platform_);
+
+  // Attaching sets flags, which are about to be frozen.
+  recordreplay::MaybeAttach();
 
   SynchronizationPointSupport::Initialize();
 

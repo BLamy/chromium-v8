@@ -37,6 +37,7 @@
 #include "src/inspector/v8-runtime-agent-impl.h"
 #include "src/inspector/v8-stack-trace-impl.h"
 #include "src/inspector/v8-value-utils.h"
+#include "src/replay/replay.h"
 
 namespace v8_inspector {
 
@@ -1907,6 +1908,51 @@ Response V8DebuggerAgentImpl::setBlackboxedRanges(
   return Response::Success();
 }
 
+Response V8DebuggerAgentImpl::getCallFrames(
+    std::unique_ptr<Array<CallFrame>>* out_callFrames) {
+  return currentCallFrames(out_callFrames);
+}
+
+Response V8DebuggerAgentImpl::getFrameLocations(
+    std::optional<double> maxFrames,
+    std::unique_ptr<Array<protocol::Debugger::Location>>* result) {
+  v8::HandleScope handles(m_isolate);
+  *result = std::make_unique<Array<protocol::Debugger::Location>>();
+  auto iterator = v8::debug::StackTraceIterator::Create(m_isolate);
+  for (; !iterator->Done(); iterator->Advance()) {
+    v8::debug::Location loc = iterator->GetSourceLocation();
+    v8::Local<v8::debug::Script> script = iterator->GetScript();
+    (*result)->emplace_back(protocol::Debugger::Location::create()
+                                .setScriptId(String16::fromInteger(script->Id()))
+                                .setLineNumber(loc.GetLineNumber())
+                                .setColumnNumber(loc.GetColumnNumber())
+                                .build());
+    if ((*result)->size() >=
+        maxFrames.value_or(std::numeric_limits<double>::max())) {
+      break;
+    }
+  }
+  return Response::Success();
+}
+
+Response V8DebuggerAgentImpl::getPendingException(
+    std::unique_ptr<protocol::Runtime::RemoteObject>* out_exception) {
+  v8::HandleScope handles(m_isolate);
+  v8::Local<v8::Value> exception;
+  if (!v8::recordreplay::GetCurrentException(&exception)) {
+    return Response::ServerError("No exception is being thrown");
+  }
+  v8::Local<v8::Context> context = m_isolate->GetCurrentContext();
+  int contextId = InspectedContext::contextId(context);
+  std::shared_ptr<InjectedScript> injectedScript;
+  std::shared_ptr<InspectedContext> inspectedContext;
+  m_session->findInjectedScript(contextId, injectedScript, &inspectedContext);
+  if (!injectedScript) return Response::ServerError("No context for the exception");
+  return injectedScript->wrapObject(exception, kBacktraceObjectGroup,
+                                    WrapOptions({WrapMode::kIdOnly}),
+                                    out_exception);
+}
+
 Response V8DebuggerAgentImpl::currentCallFrames(
     std::unique_ptr<Array<CallFrame>>* result) {
   if (!isPaused()) {
@@ -2017,6 +2063,9 @@ V8DebuggerAgentImpl::currentExternalStackTrace() {
 }
 
 bool V8DebuggerAgentImpl::isPaused() const {
+  // A replay's commands read the stack where the replay is stopped, where V8 isn't
+  // stopped in the debugger.
+  if (v8::recordreplay::IsRecordingOrReplaying()) return true;
   return m_debugger->isPausedInContextGroup(m_session->contextGroupId());
 }
 

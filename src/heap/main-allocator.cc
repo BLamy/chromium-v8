@@ -23,6 +23,7 @@
 #include "src/heap/paged-spaces.h"
 #include "src/heap/pending-allocations.h"
 #include "src/heap/spaces.h"
+#include "src/replay/replay.h"
 
 namespace v8 {
 namespace internal {
@@ -206,6 +207,8 @@ void MainAllocator::InvokeAllocationObservers(Address soon_object,
 AllocationResult MainAllocator::AllocateRawSlow(
     SafeHeapObjectSize size_in_bytes, AllocationAlignment alignment,
     AllocationOrigin origin) {
+  // Allocating here depends on what's been allocated and collected so far.
+  replayio::AutoDisallowEvents disallow_events("MainAllocator::AllocateRawSlow");
   if (!EnsureAllocation(size_in_bytes, alignment, origin)) [[unlikely]] {
     return AllocationResult::Failure();
   }
