@@ -6238,6 +6238,15 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
   isolate_data_.set_regexp_static_result_offsets_vector(
       jsregexp_static_offsets_vector());
   date_cache_ = new DateCache();
+  // The first thing to ask for the local time zone makes calls to the system.
+  // Reading a Date at a pause asks, with events disallowed, so a replay could
+  // ask before its recording did, and then not make those calls when the
+  // recording says it does. Both sides ask here, for times either side of
+  // summer, which is what the names are kept by.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    date_cache_->LocalTimezone(int64_t{1767225600000});  // January 2026.
+    date_cache_->LocalTimezone(int64_t{1782864000000});  // July 2026.
+  }
   interpreter_ = new interpreter::Interpreter(this);
   bigint_processor_ = bigint::Processor::New(new BigIntPlatform(this));
 
