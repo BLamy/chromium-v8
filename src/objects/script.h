@@ -228,6 +228,11 @@ V8_OBJECT class Script : public Struct {
   inline bool is_repl_mode() const;
   inline void set_is_repl_mode(bool value);
 
+  // [record_replay_instrumented]: whether this script's bytecode has
+  // record/replay instrumentation, decided by the compile that creates it.
+  inline bool record_replay_instrumented() const;
+  inline void set_record_replay_instrumented(bool value);
+
   // [origin_options]: optional attributes set by the embedder via ScriptOrigin,
   // and used by the embedder to make decisions about the script. V8 just passes
   // this through. Encoded in the 'flags' field.
@@ -437,6 +442,7 @@ V8_OBJECT class Script : public Struct {
   using ProduceCompileHintsBit = BreakOnEntryBit::Next<bool, 1>;
   using DeserializedBit = ProduceCompileHintsBit::Next<bool, 1>;
   using OuterLanguageModeBit = DeserializedBit::Next<LanguageMode, 1>;
+  using RecordReplayInstrumentedBit = OuterLanguageModeBit::Next<bool, 1>;
 
   template <typename IsolateT>
   EXPORT_TEMPLATE_DECLARE(V8_EXPORT_PRIVATE)

@@ -37,6 +37,7 @@
 #include "src/objects/js-generator-inl.h"
 #include "src/objects/js-promise-inl.h"
 #include "src/objects/slots.h"
+#include "src/replay/replay-internal.h"
 #include "src/sandbox/check.h"
 #include "src/snapshot/embedded/embedded-data.h"
 
@@ -2721,6 +2722,7 @@ void Debug::OnException(DirectHandle<Object> exception,
       promise_object = isolate_->factory()->undefined_value();
     }
     RCS_SCOPE(isolate_, RuntimeCallCounterId::kDebuggerCallback);
+    replayio::AutoDisallowEvents disallow_events("Debug::OnException");
     debug_delegate_->ExceptionThrown(
         v8::Utils::ToLocal(isolate_->native_context()),
         v8::Utils::ToLocal(exception), v8::Utils::ToLocal(promise_object),
@@ -2759,6 +2761,7 @@ void Debug::OnDebugBreak(DirectHandle<FixedArray> break_points_hit,
     if (lastStepAction != StepAction::StepNone) {
       break_reasons.Add(debug::BreakReason::kStep);
     }
+    replayio::AutoDisallowEvents disallow_events("Debug::OnDebugBreak");
     debug_delegate_->BreakProgramRequested(
         v8::Utils::ToLocal(isolate_->native_context()),
         inspector_break_points_hit, break_reasons);
@@ -2910,6 +2913,7 @@ void Debug::ProcessCompileEvent(bool has_compile_error,
   RCS_SCOPE(isolate_, RuntimeCallCounterId::kDebugger);
   // Ignore temporary scripts.
   if (script->id() == Script::kTemporaryScriptId) return;
+  if (!has_compile_error) RecordReplayRegisterScript(isolate_, script);
   // Attach the correct debug id to the script. The debug id is used by the
   // inspector to filter scripts by native context.
   script->set_context_data(isolate_->native_context()->debug_context_id());
@@ -2923,6 +2927,8 @@ void Debug::ProcessCompileEvent(bool has_compile_error,
   AllowJavascriptExecution allow_script(isolate_);
   {
     RCS_SCOPE(isolate_, RuntimeCallCounterId::kDebuggerCallback);
+    // A debugger is only here because a replay's commands attached one.
+    replayio::AutoDisallowEvents disallow_events("Debug::ProcessCompileEvent");
     debug_delegate_->ScriptCompiled(ToApiHandle<debug::Script>(script),
                                     has_compile_error);
   }

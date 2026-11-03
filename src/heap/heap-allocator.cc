@@ -20,6 +20,7 @@
 #include "src/heap/pending-allocations.h"
 #include "src/logging/counters.h"
 #include "src/objects/heap-object.h"
+#include "src/replay/replay.h"
 #include "src/utils/utils.h"
 
 namespace v8 {
@@ -91,6 +92,7 @@ void HeapAllocator::SetReadOnlySpace(ReadOnlySpace* read_only_space) {
 AllocationResult HeapAllocator::AllocateRawLargeInternal(
     int size_in_bytes, AllocationType allocation, AllocationOrigin origin,
     AllocationAlignment alignment, AllocationHint hint) {
+  replayio::AutoDisallowEvents disallow_events("HeapAllocator::AllocateRawLargeInternal");
   DCHECK_GT(size_in_bytes, MaxRegularHeapObjectSize(allocation));
   AllocationResult allocation_result;
   switch (allocation) {
@@ -173,6 +175,7 @@ constexpr AllocationSpace AllocationTypeToGCSpace(AllocationType type) {
 void HeapAllocator::CollectGarbage(
     AllocationType allocation, PerformHeapLimitCheck perform_heap_limit_check,
     GarbageCollectionReason gc_reason) {
+  replayio::AutoDisallowEvents disallow_events("HeapAllocator::CollectGarbage");
   if (IsSharedAllocationType(allocation)) {
     auto* isolate = heap_->isolate();
     if (isolate->shared_space_isolate() == isolate &&
@@ -556,6 +559,7 @@ bool HeapAllocator::RetryCustomAllocateLight(
 bool HeapAllocator::CollectGarbageAndRetryAllocation(
     CustomAllocationFunction allocate, AllocationType allocation,
     GarbageCollectionReason gc_reason) {
+  replayio::AutoDisallowEvents disallow_events("HeapAllocator::CollectGarbageAndRetryAllocation");
   const auto perform_heap_limit_check = v8_flags.late_heap_limit_check
                                             ? PerformHeapLimitCheck{false}
                                             : PerformHeapLimitCheck{true};

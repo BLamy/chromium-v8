@@ -11,6 +11,7 @@
 #include "src/common/assert-scope.h"
 #include "src/common/globals.h"
 #include "src/interpreter/bytecode-array-writer.h"
+#include "src/replay/replay-internal.h"
 #include "src/interpreter/bytecode-jump-table.h"
 #include "src/interpreter/bytecode-label.h"
 #include "src/interpreter/bytecode-node.h"
@@ -47,7 +48,8 @@ class RegisterTransferWriter final
 BytecodeArrayBuilder::BytecodeArrayBuilder(
     Zone* zone, int parameter_count, int locals_count,
     FeedbackVectorSpec* feedback_vector_spec,
-    SourcePositionTableBuilder::RecordingMode source_position_mode)
+    SourcePositionTableBuilder::RecordingMode source_position_mode,
+    bool record_replay_ignore)
     : zone_(zone),
       feedback_vector_spec_(feedback_vector_spec),
       bytecode_generated_(false),
@@ -70,6 +72,9 @@ BytecodeArrayBuilder::BytecodeArrayBuilder(
         zone, &register_allocator_, fixed_register_count(), parameter_count,
         zone->New<RegisterTransferWriter>(this));
   }
+
+  emit_record_replay_opcodes_ =
+      RecordReplayShouldEmitOpcodes(record_replay_ignore);
 }
 
 Register BytecodeArrayBuilder::Parameter(int parameter_index) const {
@@ -90,6 +95,7 @@ Register BytecodeArrayBuilder::Local(int index) const {
 
 template <typename IsolateT>
 Handle<BytecodeArray> BytecodeArrayBuilder::ToBytecodeArray(IsolateT* isolate) {
+  RecordReplayFlushPendingBreakpoints();
   DCHECK(RemainderOfBlockIsDead());
   DCHECK(!bytecode_generated_);
   bytecode_generated_ = true;
@@ -125,6 +131,7 @@ int BytecodeArrayBuilder::CheckBytecodeMatches(Handle<BytecodeArray> bytecode) {
 template <typename IsolateT>
 DirectHandle<TrustedByteArray> BytecodeArrayBuilder::ToSourcePositionTable(
     IsolateT* isolate) {
+  RecordReplayFlushPendingBreakpoints();
   DCHECK(RemainderOfBlockIsDead());
 
   return bytecode_array_writer_.ToSourcePositionTable(isolate);
@@ -139,6 +146,7 @@ template EXPORT_TEMPLATE_DEFINE(V8_EXPORT_PRIVATE)
 
 BytecodeSourceInfo BytecodeArrayBuilder::CurrentSourcePosition(
     Bytecode bytecode) {
+  RecordReplayFlushPendingBreakpoints();
   BytecodeSourceInfo source_position;
   if (latest_source_info_.is_valid()) {
     // Statement positions need to be emitted immediately.  Expression
@@ -176,6 +184,7 @@ void BytecodeArrayBuilder::AttachOrEmitDeferredSourceInfo(BytecodeNode* node) {
 }
 
 void BytecodeArrayBuilder::Write(BytecodeNode* node) {
+  RecordReplayFlushPendingBreakpoints();
   AttachOrEmitDeferredSourceInfo(node);
   if (!Bytecodes::IsWithoutExternalSideEffects(node->bytecode())) {
     potentially_throwing_bytecode_count_++;
@@ -191,6 +200,7 @@ void BytecodeArrayBuilder::WriteJump(BytecodeNode* node, BytecodeLabel* label) {
 
 void BytecodeArrayBuilder::WriteJumpLoop(BytecodeNode* node,
                                          BytecodeLoopHeader* loop_header) {
+  RecordReplayIncExecutionProgressCounter();
   AttachOrEmitDeferredSourceInfo(node);
   // JumpLoop can throw due to interrupt checks (stack overflow, termination).
   potentially_throwing_bytecode_count_++;
@@ -1269,6 +1279,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::Bind(BytecodeLabel* label) {
   // Don't generate code for a label which hasn't had a corresponding forward
   // jump generated already. For backwards jumps, use BindLoopHeader.
   if (!label->has_referrer_jump()) return *this;
+  RecordReplayFlushPendingBreakpoints();
 
   // Flush the register optimizer when binding a label to ensure all
   // expected registers are valid when jumping to this label.
@@ -1282,6 +1293,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::Bind(BytecodeLabel* label) {
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::Bind(
     BytecodeLoopHeader* loop_header) {
+  RecordReplayFlushPendingBreakpoints();
   // Flush the register optimizer when starting a loop to ensure all expected
   // registers are valid when jumping to the loop header.
   if (register_optimizer_) {
@@ -1294,6 +1306,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::Bind(
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::Bind(BytecodeJumpTable* jump_table,
                                                  int case_value) {
+  RecordReplayFlushPendingBreakpoints();
   // Flush the register optimizer when binding a jump table entry to ensure
   // all expected registers are valid when jumping to this location.
   if (register_optimizer_) {
@@ -1306,6 +1319,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::Bind(BytecodeJumpTable* jump_table,
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::MarkHandler(
     int handler_id, HandlerTable::CatchPrediction catch_prediction) {
+  RecordReplayFlushPendingBreakpoints();
   // The handler starts a new basic block, and any reasonable try block won't
   // let control fall through into it.
   DCHECK_IMPLIES(register_optimizer_,
@@ -1319,6 +1333,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::MarkHandler(
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::MarkTryBegin(int handler_id,
                                                          Register context) {
+  RecordReplayFlushPendingBreakpoints();
   // Flush registers to make sure everything visible to the handler is
   // materialized.
   if (register_optimizer_) register_optimizer_->Flush();
@@ -1329,6 +1344,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::MarkTryBegin(int handler_id,
 }
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::MarkTryEnd(int handler_id) {
+  RecordReplayFlushPendingBreakpoints();
   if (register_optimizer_) {
     register_optimizer_->ResetTypeHintForAccumulator();
   }
@@ -1540,6 +1556,101 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::IncBlockCounter(
     int coverage_array_slot) {
   OutputIncBlockCounter(coverage_array_slot);
   return *this;
+}
+
+BytecodeArrayBuilder&
+BytecodeArrayBuilder::RecordReplayIncExecutionProgressCounter() {
+  if (emit_record_replay_opcodes_) {
+    OutputRecordReplayIncExecutionProgressCounter();
+  }
+  return *this;
+}
+
+int BytecodeArrayBuilder::RecordReplayRegisterInstrumentationSite(
+    const char* kind, int source_position) {
+  if (!strcmp(kind, "breakpoint") && source_position != kNoSourcePosition &&
+      record_replay_instrumentation_site_locations_.count(source_position)) {
+    // Don't insert a breakpoint at the same location more than once.
+    return -1;
+  }
+  record_replay_instrumentation_site_locations_.insert(source_position);
+  int function_index = ++record_replay_instrumentation_site_counter_;
+  return RegisterInstrumentationSite(kind, source_position, function_index);
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::RecordReplayInstrumentation(
+    const char* kind, int source_position) {
+  if (emit_record_replay_opcodes_) {
+    int index = RecordReplayRegisterInstrumentationSite(kind, source_position);
+    if (index >= 0) {
+      OutputRecordReplayInstrumentation(index);
+    }
+  }
+  return *this;
+}
+
+void BytecodeArrayBuilder::RecordReplayDeferBreakpoint(int site_position) {
+  if (!emit_record_replay_opcodes_) return;
+  int index =
+      RecordReplayRegisterInstrumentationSite("breakpoint", site_position);
+  if (index < 0) return;
+  // CurrentSourcePosition() hands this bytecode any pending position.
+  static_assert(!Bytecodes::IsWithoutExternalSideEffects(
+                    Bytecode::kRecordReplayInstrumentation),
+                "RecordReplayInstrumentation takes pending source positions");
+  record_replay_pending_breakpoints_.push_back({index, latest_source_info_});
+  latest_source_info_.set_invalid();
+}
+
+void BytecodeArrayBuilder::RecordReplayWritePendingBreakpoints() {
+  // Write() flushes the queue again, so swap it out first. Nothing written here
+  // queues breakpoints, so this never nests.
+  DCHECK(record_replay_writing_breakpoints_.empty());
+  record_replay_writing_breakpoints_.swap(record_replay_pending_breakpoints_);
+  for (const RecordReplayPendingBreakpoint& breakpoint :
+       record_replay_writing_breakpoints_) {
+    BytecodeNode node(BytecodeNode::RecordReplayInstrumentation(
+        breakpoint.source_info, static_cast<uint32_t>(breakpoint.site_index)));
+    Write(&node);
+  }
+  record_replay_writing_breakpoints_.clear();
+}
+
+bool BytecodeArrayBuilder::RecordReplayMaybePopPendingBreakpoints(
+    int scope_start) {
+  if (V8_LIKELY(record_replay_pending_breakpoints_.empty())) return false;
+  DCHECK(record_replay_popped_breakpoints_.empty());
+  // Nothing has taken the pending position since the last breakpoint was queued,
+  // so its statement position is the last breakpoint's, or one set afterwards
+  // without a breakpoint.
+  const BytecodeSourceInfo& pending_statement =
+      latest_source_info_.is_statement()
+          ? latest_source_info_
+          : record_replay_pending_breakpoints_.back().source_info;
+  if (!pending_statement.is_statement() ||
+      pending_statement.source_position() < scope_start) {
+    return false;
+  }
+  auto first = record_replay_pending_breakpoints_.end();
+  while (first != record_replay_pending_breakpoints_.begin() &&
+         (first - 1)->source_info.is_valid() &&
+         (first - 1)->source_info.source_position() >= scope_start) {
+    --first;
+  }
+  record_replay_popped_breakpoints_.assign(
+      first, record_replay_pending_breakpoints_.end());
+  record_replay_pending_breakpoints_.erase(
+      first, record_replay_pending_breakpoints_.end());
+  return !record_replay_popped_breakpoints_.empty();
+}
+
+void BytecodeArrayBuilder::RecordReplayPushPoppedBreakpoints() {
+  if (V8_LIKELY(record_replay_popped_breakpoints_.empty())) return;
+  record_replay_pending_breakpoints_.insert(
+      record_replay_pending_breakpoints_.end(),
+      record_replay_popped_breakpoints_.begin(),
+      record_replay_popped_breakpoints_.end());
+  record_replay_popped_breakpoints_.clear();
 }
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::ForInEnumerate(Register receiver) {

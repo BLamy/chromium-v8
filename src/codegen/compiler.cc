@@ -67,10 +67,17 @@
 #ifdef V8_ENABLE_MAGLEV
 #include "src/maglev/maglev-concurrent-dispatcher.h"
 #include "src/maglev/maglev.h"
+#include "src/replay/replay-internal.h"
 #endif  // V8_ENABLE_MAGLEV
 
 namespace v8 {
 namespace internal {
+
+namespace {
+void SetRecordReplayFlags(UnoptimizedCompileFlags& flags,
+                          const ScriptDetails& script_details,
+                          NativesFlag natives);
+}  // namespace
 
 namespace {
 
@@ -3051,6 +3058,9 @@ bool Compiler::Compile(Isolate* isolate, Handle<SharedFunctionInfo> shared_info,
                        ClearExceptionFlag flag,
                        IsCompiledScope* is_compiled_scope,
                        CreateSourcePositions create_source_positions_flag) {
+  // Whether a function has been compiled yet can differ when replaying, as asking
+  // where its breakpoints are compiles it.
+  replayio::AutoDisallowEvents disallow_events("Compiler::Compile");
   // We should never reach here if the function is already compiled.
   DCHECK(!shared_info->is_compiled());
   DCHECK(!is_compiled_scope->is_compiled());
@@ -3438,6 +3448,7 @@ MaybeDirectHandle<JSFunction> Compiler::GetFunctionFromEval(
         private_name_lookup_skips_outer_class);
     DCHECK(!flags.is_module());
     flags.set_parse_restriction(restriction);
+    SetRecordReplayFlags(flags, ScriptDetails(), NOT_NATIVES_CODE);
 
     UnoptimizedCompileState compile_state;
     ReusableUnoptimizedCompileState reusable_state(isolate);
@@ -3855,6 +3866,27 @@ Handle<Script> NewScript(Isolate* isolate, ParseInfo* parse_info,
   return script;
 }
 
+// Decides whether the script a compile creates gets record/replay instrumentation.
+// Whatever a replay compiles for itself doesn't, and neither do an embedder's own
+// scripts, which are to a program what a browser's internals are to a page.
+void SetRecordReplayFlags(UnoptimizedCompileFlags& flags,
+                          const ScriptDetails& script_details,
+                          NativesFlag natives) {
+  if (!recordreplay::IsRecordingOrReplaying()) return;
+  if (natives != NOT_NATIVES_CODE || !recordreplay::IsMainThread() ||
+      recordreplay::AreEventsDisallowed()) {
+    flags.set_record_replay_ignore(true);
+    return;
+  }
+  DirectHandle<Object> name;
+  if (script_details.name_obj.ToHandle(&name) && IsString(*name)) {
+    std::unique_ptr<char[]> text = Cast<String>(*name)->ToCString();
+    if (RecordReplayIgnoreScriptByURL(text.get())) {
+      flags.set_record_replay_ignore(true);
+    }
+  }
+}
+
 MaybeDirectHandle<SharedFunctionInfo> CompileScriptOnMainThread(
     const UnoptimizedCompileFlags flags, DirectHandle<String> source,
     const ScriptDetails& script_details, NativesFlag natives,
@@ -3881,8 +3913,12 @@ MaybeDirectHandle<SharedFunctionInfo> CompileScriptOnMainThread(
   }
   DCHECK_EQ(parse_info.flags().is_repl_mode(), script->is_repl_mode());
 
-  return Compiler::CompileToplevel(&parse_info, script, isolate,
-                                   is_compiled_scope);
+  MaybeHandle<SharedFunctionInfo> result = Compiler::CompileToplevel(
+      &parse_info, script, isolate, is_compiled_scope);
+  // Known about as soon as it's compiled: a module isn't instantiated until its
+  // whole import graph has loaded, and never is if that fails.
+  if (!result.is_null()) RecordReplayRegisterScript(isolate, script);
+  return result;
 }
 
 class StressBackgroundCompileThread : public ParkingThread {
@@ -4171,6 +4207,7 @@ MaybeDirectHandle<SharedFunctionInfo> GetSharedFunctionInfoForScriptImpl(
               isolate, natives == NOT_NATIVES_CODE, language_mode,
               script_details.repl_mode, script_type, v8_flags.lazy);
 
+      SetRecordReplayFlags(flags, script_details, natives);
       flags.set_is_eager(compile_options & ScriptCompiler::kEagerCompile);
       flags.set_compile_hints_magic_enabled(
           v8_flags.compile_hints_magic ||
@@ -4352,6 +4389,7 @@ MaybeDirectHandle<JSFunction> Compiler::GetWrappedFunction(
     // being omitted.
     flags.set_collect_source_positions(true);
     flags.set_is_eager(compile_options & ScriptCompiler::kEagerCompile);
+    SetRecordReplayFlags(flags, script_details, NOT_NATIVES_CODE);
 
     UnoptimizedCompileState compile_state;
     ReusableUnoptimizedCompileState reusable_state(isolate);

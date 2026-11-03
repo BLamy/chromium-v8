@@ -16,6 +16,7 @@
 #include "src/logging/log.h"
 #include "src/numbers/hash-seed-inl.h"
 #include "src/objects/objects-inl.h"
+#include "src/replay/replay.h"
 #include "src/objects/scope-info.h"
 #include "src/zone/zone.h"
 
@@ -156,6 +157,7 @@ void UnoptimizedCompileFlags::SetFlagsForFunctionFromScript(
 
   set_block_coverage_enabled(block_coverage_enabled() &&
                              script->IsUserJavaScript());
+  set_record_replay_ignore(!script->record_replay_instrumented());
   if (is_toplevel() && script->compilation_kind() ==
                            Script::CompilationKind::kFunctionConstructor) {
     set_parse_restriction(ONLY_SINGLE_FUNCTION_LITERAL);
@@ -271,6 +273,11 @@ Handle<Script> ParseInfo::CreateScript(
   raw_script->set_origin_options(origin_options);
   raw_script->set_is_repl_mode(flags().is_repl_mode());
   raw_script->set_outer_language_mode(flags().outer_language_mode());
+  // The one place a script's instrumentation is decided. Compiles of an existing
+  // script inherit it, in SetFlagsForFunctionFromScript.
+  raw_script->set_record_replay_instrumented(
+      recordreplay::IsRecordingOrReplaying() &&
+      !flags().record_replay_ignore());
 
   DCHECK_EQ(is_wrapped_as_function(), !maybe_wrapped_arguments.is_null());
   if (is_wrapped_as_function()) {

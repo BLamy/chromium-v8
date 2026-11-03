@@ -113,6 +113,7 @@
 #include "src/profiler/heap-profiler.h"
 #include "src/profiler/tracing-cpu-profiler.h"
 #include "src/regexp/regexp-stack.h"
+#include "src/replay/replay-internal.h"
 #include "src/roots/roots.h"
 #include "src/roots/static-roots.h"
 #include "src/sandbox/js-dispatch-table-inl.h"
@@ -7923,7 +7924,12 @@ void Isolate::CountUsage(
   }
 }
 
-int Isolate::GetNextScriptId() { return heap()->NextScriptId(); }
+int Isolate::GetNextScriptId() {
+  // Scripts are named by their IDs in a recording, which has one list of them
+  // whatever isolate they're in.
+  if (recordreplay::IsRecordingOrReplaying()) return RecordReplayNextScriptId();
+  return heap()->NextScriptId();
+}
 
 // static
 std::string Isolate::GetTurboCfgFileName(Isolate* isolate) {

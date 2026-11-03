@@ -20,6 +20,7 @@
 #include "src/numbers/conversions.h"
 #include "src/objects/contexts.h"
 #include "src/objects/template-objects-inl.h"
+#include "src/replay/replay-internal.h"
 #include "src/runtime/runtime-utils.h"
 #include "src/utils/ostreams.h"
 
@@ -257,6 +258,7 @@ RUNTIME_FUNCTION(Runtime_ThrowInvalidTypedArrayAlignment) {
 RUNTIME_FUNCTION(Runtime_UnwindAndFindExceptionHandler) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(0, args.length());
+  RecordReplayOnExceptionUnwind(isolate);
   return isolate->UnwindAndFindHandler();
 }
 

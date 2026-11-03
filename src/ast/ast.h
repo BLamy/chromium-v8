@@ -1853,8 +1853,10 @@ class Call final : public CallBase {
 
   Call(Zone* zone, Expression* expression,
        const ScopedPtrList<Expression>& arguments, int pos, bool has_spread,
-       int eval_scope_info_index, bool optional_chain)
-      : CallBase(zone, kCall, expression, arguments, pos, has_spread) {
+       int eval_scope_info_index, bool optional_chain,
+       int call_head_token_position)
+      : CallBase(zone, kCall, expression, arguments, pos, has_spread),
+        call_head_token_position_(call_head_token_position) {
     bit_field_ |= IsTaggedTemplateField::encode(false) |
                   IsOptionalChainLinkField::encode(optional_chain) |
                   EvalScopeInfoIndexField::encode(eval_scope_info_index);
@@ -1873,7 +1875,13 @@ class Call final : public CallBase {
   using IsTaggedTemplateField = CallBase::NextBitField<bool, 1>;
   using IsOptionalChainLinkField = IsTaggedTemplateField::Next<bool, 1>;
 
+  // Where the call's arguments start, for a record/replay breakpoint between
+  // evaluating them and making the call.
+  int call_head_token_position_ = 0;
+
  public:
+  int call_head_token_position() const { return call_head_token_position_; }
+
   using EvalScopeInfoIndexField = IsOptionalChainLinkField::Next<uint32_t, 20>;
 };
 
@@ -3374,10 +3382,12 @@ class AstNodeFactory final {
   Call* NewCall(Expression* expression,
                 const ScopedPtrList<Expression>& arguments, int pos,
                 bool has_spread, int eval_scope_info_index = 0,
-                bool optional_chain = false) {
+                bool optional_chain = false,
+                int call_head_token_position = 0) {
     DCHECK_IMPLIES(eval_scope_info_index > 0, !optional_chain);
     return zone_->New<Call>(zone_, expression, arguments, pos, has_spread,
-                            eval_scope_info_index, optional_chain);
+                            eval_scope_info_index, optional_chain,
+                            call_head_token_position);
   }
 
   SuperCallForwardArgs* NewSuperCallForwardArgs(SuperCallReference* expression,

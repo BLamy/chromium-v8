@@ -39,6 +39,7 @@
 
 #if V8_ENABLE_WEBASSEMBLY
 #include "src/debug/debug-wasm-objects.h"
+#include "src/replay/replay.h"
 #include "src/wasm/canonical-types.h"
 #include "src/wasm/stacks.h"
 #include "src/wasm/wasm-code-manager.h"
@@ -394,6 +395,10 @@ DebuggableStackFrameIterator::DebuggableStackFrameIterator(Isolate* isolate)
 DebuggableStackFrameIterator::DebuggableStackFrameIterator(Isolate* isolate,
                                                            StackFrameId id)
     : DebuggableStackFrameIterator(isolate) {
+  // A replay reads the stack where it's stopped, with no break frame.
+  if (id == StackFrameId::NO_ID && recordreplay::IsRecordingOrReplaying()) {
+    return;
+  }
   while (!done() && frame()->id() != id) Advance();
 }
 

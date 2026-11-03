@@ -3941,6 +3941,10 @@ void BytecodeGraphBuilder::VisitDebugger() {
 DEBUG_BREAK_BYTECODE_LIST(DEBUG_BREAK)
 #undef DEBUG_BREAK
 
+// Only the interpreter runs when recording or replaying.
+void BytecodeGraphBuilder::VisitRecordReplayIncExecutionProgressCounter() { UNREACHABLE(); }
+void BytecodeGraphBuilder::VisitRecordReplayInstrumentation() { UNREACHABLE(); }
+
 void BytecodeGraphBuilder::VisitIncBlockCounter() {
   Node* closure = GetFunctionClosure();
   Node* coverage_array_slot =
