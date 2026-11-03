@@ -10,6 +10,7 @@
 #include <optional>
 #include <sstream>
 #include <unordered_map>
+#include <vector>
 
 #include "include/v8-locker.h"
 #include "src/api/api-inl.h"
@@ -227,6 +228,17 @@ void ForEachInstrumentationSite(Isolate* isolate, Handle<Script> script,
   }
 }
 
+// The breakpoint sites of scripts whose isolates have been disposed, on a replay.
+struct RememberedBreakpoint {
+  int line;
+  int column;
+  std::string function;
+  int function_index;
+};
+std::unordered_map<int, std::vector<RememberedBreakpoint>>* gRememberedBreakpoints;
+
+void RememberBreakpoints(int script_id, const RegisteredScript& entry);
+
 // Sites of kind breakpoint within the begin and end in a command's parameters.
 template <typename Callback>
 void ForEachBreakpointInRange(const RegisteredScript& entry, const char* params,
@@ -433,6 +445,25 @@ std::string CommandWithoutFrames(const char* command) {
   return "{\"error\":\"No JS is running here\"}";
 }
 
+void RememberBreakpoints(int script_id, const RegisteredScript& entry) {
+  if (!gRememberedBreakpoints) {
+    gRememberedBreakpoints =
+        new std::unordered_map<int, std::vector<RememberedBreakpoint>>();
+  }
+  ScriptScope scope(entry);
+  Handle<Script> script = entry.script;
+  std::vector<RememberedBreakpoint>& remembered =
+      (*gRememberedBreakpoints)[script_id];
+  ForEachInstrumentationSite(
+      entry.isolate, script, [&](Tagged<SharedFunctionInfo> shared, int site) {
+        if (strcmp(InstrumentationSiteKind(site), "breakpoint")) return;
+        int line, column;
+        GetSiteLocation(script, site, &line, &column);
+        remembered.push_back({line, column, GetRecordReplayFunctionId(shared),
+                              InstrumentationSiteFunctionIndex(site)});
+      });
+}
+
 }  // namespace
 
 bool RecordReplayShouldEmitOpcodes(bool record_replay_ignore) {
@@ -544,6 +575,14 @@ void RecordReplaySetGlue(const RecordReplayGlue* glue) { gGlue = glue; }
 
 void RecordReplayOnIsolateDispose(Isolate* isolate) {
   if (!recordreplay::IsRecordingOrReplaying()) return;
+  // A replay is asked for each source's breakpoints when it reaches the end,
+  // which for a process that ends by itself is after its isolates have gone.
+  if (recordreplay::IsReplaying() && gScripts) {
+    replayio::AutoDisallowEvents disallow("RecordReplayOnIsolateDispose");
+    for (auto& [id, entry] : *gScripts) {
+      if (entry.isolate == isolate) RememberBreakpoints(id, entry);
+    }
+  }
   if (gGlue) gGlue->on_isolate_dispose(isolate);
   if (!gScripts) return;
   for (auto it = gScripts->begin(); it != gScripts->end();) {
@@ -574,7 +613,18 @@ void PossibleBreakpointsCallback(const char* source_id) {
   CHECK(recordreplay::IsMainThread());
   replayio::AutoDisallowEvents disallow("PossibleBreakpointsCallback");
   const RegisteredScript* entry = FindScript(atoi(source_id));
-  if (!entry) return;
+  if (!entry) {
+    if (gRememberedBreakpoints) {
+      auto remembered = gRememberedBreakpoints->find(atoi(source_id));
+      if (remembered != gRememberedBreakpoints->end()) {
+        for (const RememberedBreakpoint& b : remembered->second) {
+          RecordReplayAddPossibleBreakpoint(b.line, b.column, b.function.c_str(),
+                                            b.function_index);
+        }
+      }
+    }
+    return;
+  }
   ScriptScope scope(*entry);
   Handle<Script> script = entry->script;
   ForEachInstrumentationSite(

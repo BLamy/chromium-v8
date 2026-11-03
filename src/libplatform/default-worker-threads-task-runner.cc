@@ -6,6 +6,7 @@
 
 #include "src/base/platform/time.h"
 #include "src/libplatform/delayed-task-queue.h"
+#include "src/replay/replay.h"
 
 namespace v8 {
 namespace platform {
@@ -82,6 +83,9 @@ DefaultWorkerThreadsTaskRunner::WorkerThread::WorkerThread(
 
 DefaultWorkerThreadsTaskRunner::WorkerThread::~WorkerThread() {
   condition_var_.NotifyAll();
+  // The driver parks these threads for good, on both sides. Nothing would come
+  // of waiting, and a process that ends by itself, like workerd test, would hang.
+  if (recordreplay::IsRecordingOrReplaying()) return;
   Join();
 }
 
