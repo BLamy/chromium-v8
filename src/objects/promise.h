@@ -1,0 +1,252 @@
+// Copyright 2018 the V8 project authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+#ifndef V8_OBJECTS_PROMISE_H_
+#define V8_OBJECTS_PROMISE_H_
+
+#include "src/objects/microtask.h"
+
+// Has to be the last include (doesn't have include guards):
+#include "src/objects/object-macros.h"
+
+namespace v8 {
+namespace internal {
+
+class JSPromise;
+class StructBodyDescriptor;
+class PromiseCapability;
+class PromiseReaction;
+class MicrotaskQueueBuiltinsAssembler;
+class SandboxTesting;
+class JSGeneratorObject;
+
+using PromiseReactionHandler =
+    UnionOf<Undefined, JSGeneratorObject, JSCallable>;
+
+// Struct to hold state required for PromiseReactionJob. See the comment on the
+// PromiseReaction below for details on how this is being managed to reduce the
+// memory and allocation overhead. This is the base class for the concrete
+//
+//   - PromiseFulfillReactionJobTask
+//   - PromiseRejectReactionJobTask
+//
+// classes, which are used to represent either reactions, and we distinguish
+// them by their instance types.
+V8_OBJECT class PromiseReactionJobTask : public Microtask {
+  V8_IT_ABSTRACT;
+
+ public:
+  inline Tagged<Object> argument() const;
+  inline void set_argument(Tagged<Object> value,
+                           WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  inline Tagged<Context> context() const;
+  inline void set_context(Tagged<Context> value,
+                          WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  inline Tagged<PromiseReactionHandler> handler()
+      const;
+  inline void set_handler(
+      Tagged<PromiseReactionHandler> value,
+      WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  inline Tagged<UnionOf<JSPromise, PromiseCapability, Undefined>>
+  promise_or_capability() const;
+  inline void set_promise_or_capability(
+      Tagged<UnionOf<JSPromise, PromiseCapability, Undefined>> value,
+      WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  using BodyDescriptor = StructBodyDescriptor;
+
+  DECL_VERIFIER(PromiseReactionJobTask)
+  DECL_PRINTER(PromiseReactionJobTask)
+
+ private:
+  friend class TorqueGeneratedPromiseReactionJobTaskAsserts;
+  friend class MicrotaskQueueBuiltinsAssembler;
+  friend class JSPromise;
+  friend struct ObjectTraits<PromiseReactionJobTask>;
+
+  TaggedMember<Object> argument_;
+  TaggedMember<Context> context_;
+  TaggedMember<UnionOf<Undefined, JSGeneratorObject, JSCallable>> handler_;
+  TaggedMember<UnionOf<JSPromise, PromiseCapability, Undefined>>
+      promise_or_capability_;
+} V8_OBJECT_END;
+
+// Struct to hold state required for a PromiseReactionJob of type "Fulfill".
+V8_OBJECT class PromiseFulfillReactionJobTask : public PromiseReactionJobTask {
+ public:
+  using BodyDescriptor = StructBodyDescriptor;
+
+  DECL_VERIFIER(PromiseFulfillReactionJobTask)
+  DECL_PRINTER(PromiseFulfillReactionJobTask)
+} V8_OBJECT_END;
+
+// Struct to hold state required for a PromiseReactionJob of type "Reject".
+V8_OBJECT class PromiseRejectReactionJobTask : public PromiseReactionJobTask {
+ public:
+  using BodyDescriptor = StructBodyDescriptor;
+
+  DECL_VERIFIER(PromiseRejectReactionJobTask)
+  DECL_PRINTER(PromiseRejectReactionJobTask)
+} V8_OBJECT_END;
+
+// A container struct to hold state required for PromiseResolveThenableJob.
+V8_OBJECT class PromiseResolveThenableJobTask : public Microtask {
+ public:
+  inline PromiseResolveThenableJobTask(
+      const AllocationWitness& witness, Tagged<JSPromise> promise_to_resolve,
+      Tagged<JSReceiver> thenable, Tagged<JSReceiver> then,
+      Tagged<Context> context
+#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+      ,
+      Tagged<Object> continuation_preserved_embedder_data
+#endif
+  );
+
+  inline Tagged<Context> context() const;
+  inline Tagged<JSPromise> promise_to_resolve() const;
+  inline Tagged<JSReceiver> thenable() const;
+  inline Tagged<JSReceiver> then() const;
+
+  using BodyDescriptor = StructBodyDescriptor;
+
+  DECL_VERIFIER(PromiseResolveThenableJobTask)
+  DECL_PRINTER(PromiseResolveThenableJobTask)
+
+ private:
+  friend class TorqueGeneratedPromiseResolveThenableJobTaskAsserts;
+  friend class MicrotaskQueueBuiltinsAssembler;
+
+  const TaggedMember<Context> context_;
+  const TaggedMember<JSPromise> promise_to_resolve_;
+  const TaggedMember<JSReceiver> thenable_;
+  const TaggedMember<JSReceiver> then_;
+} V8_OBJECT_END;
+
+// Struct to hold the state of a PromiseCapability.
+V8_OBJECT class PromiseCapability : public Struct {
+ public:
+  inline PromiseCapability(const AllocationWitness& witness,
+                           Tagged<UnionOf<JSReceiver, Undefined>> promise,
+                           Tagged<JSAny> resolve, Tagged<JSAny> reject);
+
+  inline Tagged<UnionOf<JSReceiver, Undefined>> promise() const;
+  inline Tagged<JSAny> resolve() const;
+  inline Tagged<JSAny> reject() const;
+
+  using BodyDescriptor = StructBodyDescriptor;
+
+  DECL_VERIFIER(PromiseCapability)
+  DECL_PRINTER(PromiseCapability)
+
+ private:
+  friend class TorqueGeneratedPromiseCapabilityAsserts;
+  friend class MicrotaskQueueBuiltinsAssembler;
+
+  const TaggedMember<UnionOf<JSReceiver, Undefined>> promise_;
+  const TaggedMember<JSAny> resolve_;
+  const TaggedMember<JSAny> reject_;
+} V8_OBJECT_END;
+
+// A representation of promise reaction. This differs from the specification
+// in that the PromiseReaction here holds both handlers for the fulfill and
+// the reject case. When a JSPromise is eventually resolved (either via
+// fulfilling it or rejecting it), we morph this PromiseReaction object in
+// memory into a proper PromiseReactionJobTask and schedule it on the queue
+// of microtasks. So the size of PromiseReaction and the size of the
+// PromiseReactionJobTask has to be same for this to work.
+//
+// The PromiseReaction::promise_or_capability field can either hold a JSPromise
+// instance (in the fast case of a native promise) or a PromiseCapability in
+// case of a Promise subclass. In case of await it can also be undefined if
+// PromiseHooks are disabled (see https://github.com/tc39/ecma262/pull/1146).
+//
+// The PromiseReaction objects form a singly-linked list, terminated by
+// Smi 0. On the JSPromise instance they are linked in reverse order,
+// and are turned into the proper order again when scheduling them on
+// the microtask queue.
+V8_OBJECT class PromiseReaction : public Struct {
+ public:
+  enum Type { kFulfill, kReject };
+
+#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+  inline Tagged<Object> continuation_preserved_embedder_data() const;
+  inline void set_continuation_preserved_embedder_data(
+      Tagged<Object> value, WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+#endif
+
+  inline Tagged<UnionOf<PromiseReaction, Smi>> next() const;
+  inline void set_next(Tagged<UnionOf<PromiseReaction, Smi>> value,
+                       WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  inline Tagged<UnionOf<JSCallable, JSGeneratorObject, Undefined>>
+  reject_handler() const;
+  inline void set_reject_handler(
+      Tagged<UnionOf<JSCallable, JSGeneratorObject, Undefined>> value,
+      WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  inline Tagged<UnionOf<JSCallable, JSGeneratorObject, Undefined>>
+  fulfill_handler() const;
+  inline void set_fulfill_handler(
+      Tagged<UnionOf<JSCallable, JSGeneratorObject, Undefined>> value,
+      WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  inline Tagged<UnionOf<JSPromise, PromiseCapability, Undefined>>
+  promise_or_capability() const;
+  inline void set_promise_or_capability(
+      Tagged<UnionOf<JSPromise, PromiseCapability, Undefined>> value,
+      WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+
+  using BodyDescriptor = StructBodyDescriptor;
+
+  DECL_VERIFIER(PromiseReaction)
+  DECL_PRINTER(PromiseReaction)
+
+ private:
+  friend class TorqueGeneratedPromiseReactionAsserts;
+  friend class MicrotaskQueueBuiltinsAssembler;
+  friend class JSPromise;
+  friend class SandboxTesting;
+  friend struct ObjectTraits<PromiseReaction>;
+
+#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+  TaggedMember<Object> continuation_preserved_embedder_data_;
+#endif
+  TaggedMember<UnionOf<PromiseReaction, Zero>> next_;
+  TaggedMember<UnionOf<Undefined, JSGeneratorObject, JSCallable>>
+      reject_handler_;
+  TaggedMember<UnionOf<Undefined, JSGeneratorObject, JSCallable>>
+      fulfill_handler_;
+  TaggedMember<UnionOf<JSPromise, PromiseCapability, Undefined>>
+      promise_or_capability_;
+} V8_OBJECT_END;
+
+template <>
+struct ObjectTraits<PromiseReaction> {
+  static constexpr int kFulfillHandlerOffset =
+      offsetof(PromiseReaction, fulfill_handler_);
+  static constexpr int kPromiseOrCapabilityOffset =
+      offsetof(PromiseReaction, promise_or_capability_);
+#ifdef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
+  static constexpr int kContinuationPreservedEmbedderDataOffset =
+      offsetof(PromiseReaction, continuation_preserved_embedder_data_);
+#endif
+};
+
+template <>
+struct ObjectTraits<PromiseReactionJobTask> : public ObjectTraits<Microtask> {
+  static constexpr int kHandlerOffset =
+      offsetof(PromiseReactionJobTask, handler_);
+  static constexpr int kPromiseOrCapabilityOffset =
+      offsetof(PromiseReactionJobTask, promise_or_capability_);
+};
+
+}  // namespace internal
+}  // namespace v8
+
+#include "src/objects/object-macros-undef.h"
+
+#endif  // V8_OBJECTS_PROMISE_H_

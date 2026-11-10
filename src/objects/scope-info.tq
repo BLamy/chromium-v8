@@ -1,0 +1,134 @@
+// Copyright 2019 the V8 project authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+extern macro EmptyScopeInfoConstant(): ScopeInfo;
+const kEmptyScopeInfo: ScopeInfo = EmptyScopeInfoConstant();
+
+extern enum ScopeType extends uint32 {
+  // The empty scope info for builtins and NativeContexts is allocated
+  // in a way that it gets the first scope type in line, see
+  // Heap::CreateInitialMaps(). It's always guarded with the IsEmpty
+  // bit, so it doesn't matter what scope type it gets.
+  // Start of top-level scopes.
+  SCRIPT_SCOPE,
+  REPL_MODE_SCOPE,
+  EVAL_SCOPE,
+  MODULE_SCOPE,
+  // End of top-level scopes.
+  CLASS_SCOPE,
+  FUNCTION_SCOPE,
+  CATCH_SCOPE,
+  BLOCK_SCOPE,
+  WITH_SCOPE,
+  SHADOW_REALM_SCOPE
+}
+
+extern enum VariableAllocationInfo extends uint32 {
+  NONE,
+  STACK,
+  CONTEXT,
+  UNUSED
+}
+
+extern enum VariableMode extends int32 {
+  kLet,
+  kConst,
+  kUsing,
+  kAwaitUsing,
+  kVar,
+  kTemporary,
+  kDynamic,
+  kDynamicGlobal,
+  kDynamicLocal,
+  kPrivateMethod,
+  kPrivateSetterOnly,
+  kPrivateGetterOnly,
+  kPrivateGetterAndSetter
+}
+
+extern enum InitializationFlag extends uint32 {
+  kNeedsInitialization,
+  kCreatedInitialized
+}
+
+extern enum IsStaticFlag extends uint32 { kNotStatic, kStatic }
+
+extern enum MaybeAssignedFlag extends uint32 { kNotAssigned, kMaybeAssigned }
+
+// Properties of scopes.
+@cppScope('ScopeInfo::Flags')
+bitfield struct ScopeInfoFlags extends uint32 {
+  scope_type: ScopeType: 4 bit;
+  sloppy_eval_can_extend_vars: bool: 1 bit;
+  language_mode: LanguageMode: 1 bit;
+  declaration_scope: bool: 1 bit;
+  receiver_variable: VariableAllocationInfo: 2 bit;
+  // In class scope, this indicates whether the class has a private brand.
+  // In constructor scope, this indicates whether the constructor needs
+  // private brand initialization.
+  class_scope_has_private_brand: bool: 1 bit;
+  has_saved_class_variable: bool: 1 bit;
+  allocates_arguments: bool: 1 bit;
+  // TODO(cbruni): Combine with function variable field when only storing the
+  // function name.
+  function_variable: VariableAllocationInfo: 2 bit;
+  has_inferred_function_name: bool: 1 bit;
+  has_simple_parameters: bool: 1 bit;
+  function_kind: FunctionKind: 5 bit;
+  has_outer_scope_info: bool: 1 bit;
+  is_debug_evaluate_scope: bool: 1 bit;
+  force_context_allocation: bool: 1 bit;
+  private_name_lookup_skips_outer_class: bool: 1 bit;
+  // Indicates that the context has a context extension slot.
+  has_context_extension_slot: bool: 1 bit;
+  // Indicates that there are contexts with a context extension (meaningful
+  // only for contexts with "sloppy_eval_can_extend_vars" flag set).
+  some_context_has_extension: bool: 1 bit;
+  is_hidden: bool: 1 bit;
+  is_wrapped_function: bool: 1 bit;
+  has_context_cells: bool: 1 bit;
+  is_hoisted_in_context: bool: 1 bit;
+}
+
+struct PositionInfo {
+  start: Smi;
+  end: Smi;
+}
+
+// LINT.IfChange(ScopeInfoStructs)
+@cppScope('ScopeInfo')
+bitfield struct VariableProperties extends uint31 {
+  variable_mode: VariableMode: 4 bit;
+  init_flag: InitializationFlag: 1 bit;
+  maybe_assigned_flag: MaybeAssignedFlag: 1 bit;
+  is_parameter: bool: 1 bit;
+  parameter_number_or_position: uint32: 16 bit;
+  is_static_flag: IsStaticFlag: 1 bit;
+}
+// LINT.ThenChange(src/objects/scope-info.h)
+
+const kMaxInlinedLocalNamesSize:
+    constexpr int32 generates 'kScopeInfoMaxInlinedLocalNamesSize';
+
+// Only the fixed header is visible to Torque. The variable-length tail
+// (context local names and infos, function variable info, module data, ...)
+// is laid out by the Foo...Offset() accessors in scope-info-inl.h; see the
+// layout comment in scope-info.h. CSA reaches the context locals through
+// CodeStubAssembler::IndexOfLocalName / GetFunctionContextSlotInitialValue.
+@cppObjectLayoutDefinition
+extern class ScopeInfo extends HeapObject {
+  @cppRelaxedLoad @cppRelaxedStore const flags: ScopeInfoFlags;
+
+  @if(TAGGED_SIZE_8_BYTES) optional_padding: uint32;
+
+  // The number of parameters. For non-function scopes this is 0.
+  parameter_count: Smi;
+
+  // The number of non-parameter and parameter variables allocated in the
+  // context.
+  const context_local_count: Smi;
+
+  // Contains two slots with a) the startPosition and b) the endPosition.
+  position_info: PositionInfo;
+}
