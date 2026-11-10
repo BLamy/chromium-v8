@@ -118,6 +118,8 @@ v8_source_set("inspector_string_conversions") {
 v8_source_set("inspector") {
   deps = [
     ":inspector_string_conversions",
+    # For src/replay/replay-glue.cc, which uses V8's internals.
+    "../..:v8_internal_headers",
     "../..:v8_tracing",
     "../..:v8_version",
     "../../third_party/inspector_protocol:crdtp",
