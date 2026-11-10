@@ -23,8 +23,8 @@
 #include "src/replay/replay-glue-js.h"
 #include "src/inspector/protocol/Runtime.h"
 #include "src/replay/replay-internal.h"
-#include "third_party/inspector_protocol/crdtp/json.h"
-#include "third_party/inspector_protocol/crdtp/span.h"
+#include "../../third_party/inspector_protocol/crdtp/json.h"
+#include "../../third_party/inspector_protocol/crdtp/span.h"
 
 namespace v8 {
 namespace internal {
