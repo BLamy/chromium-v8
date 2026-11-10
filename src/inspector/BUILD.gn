@@ -161,6 +161,8 @@ v8_source_set("inspector") {
     "v8-console.h",
     "v8-debugger-agent-impl.cc",
     "v8-debugger-agent-impl.h",
+    "../replay/replay-glue-js.h",
+    "../replay/replay-glue.cc",
     "v8-debugger-barrier.cc",
     "v8-debugger-barrier.h",
     "v8-debugger-id.cc",
