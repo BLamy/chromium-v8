@@ -84,6 +84,12 @@ void ApplyFlagOverrides() {
 
   // Async stack traces depend on how code was compiled.
   v8_flags.async_stack_traces = false;
+
+  // Whether a reservation near the binary succeeds depends on where the
+  // system puts things, which isn't the same on a replay. When it failed
+  // there and not when recording, the fallback's static was initialized on
+  // one side only.
+  v8_flags.better_code_range_allocation = false;
 }
 
 void SetRecordingOrReplaying(void* handle) {
