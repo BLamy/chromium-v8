@@ -84,6 +84,15 @@ struct RecordReplayGlue {
 };
 V8_EXPORT_PRIVATE void RecordReplaySetGlue(const RecordReplayGlue* glue);
 
+// The isolate whose embedder answers commands in a page, once there is one.
+V8_EXPORT_PRIVATE void RecordReplaySetPageCommandIsolate(Isolate* isolate);
+// Target.evaluatePrivileged asked for before any page existed, as the params
+// each came with, or null past the last. Whoever replays sets itself up at the
+// first checkpoint, which is before V8 has an isolate. The embedder runs these
+// in the first page.
+V8_EXPORT_PRIVATE const char* RecordReplayPendingPrivilegedEvaluation(
+    size_t index);
+
 }  // namespace internal
 }  // namespace v8
 

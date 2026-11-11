@@ -403,6 +403,13 @@ extern "C" V8_EXPORT void V8RecordReplaySetPageCommandHandler(
   v8::internal::PageCommandHandler& handler = (*gPageCommandHandlers)[isolate];
   handler.context.Reset(isolate, context);
   handler.function.Reset(isolate, function);
+  v8::internal::RecordReplaySetPageCommandIsolate(
+      reinterpret_cast<v8::internal::Isolate*>(isolate));
+}
+
+extern "C" V8_EXPORT const char* V8RecordReplayPendingPrivilegedEvaluation(
+    size_t index) {
+  return v8::internal::RecordReplayPendingPrivilegedEvaluation(index);
 }
 
 extern "C" V8_EXPORT uint64_t V8RecordReplayProgressCounter() {

@@ -437,6 +437,9 @@ std::string CommandGetStackFunctionIds() {
   return os.str();
 }
 
+Isolate* gPageCommandIsolate = nullptr;
+std::vector<std::string>* gPendingPrivilegedEvaluations = nullptr;
+
 // With no frames there's nothing a JS command could say.
 std::string CommandWithoutFrames(const char* command) {
   if (!strcmp(command, "Pause.getAllFrames")) {
@@ -564,7 +567,20 @@ char* CommandCallback(const char* command, const char* params) {
     result = CommandGetStackFunctionIds();
   } else {
     v8::Isolate* current = v8::Isolate::TryGetCurrent();
-    if (!current) {
+    if (!gPageCommandIsolate && !strcmp(command, "Target.evaluatePrivileged")) {
+      // There's no page yet to evaluate this in. The first one will.
+      if (!gPendingPrivilegedEvaluations) {
+        gPendingPrivilegedEvaluations = new std::vector<std::string>();
+      }
+      gPendingPrivilegedEvaluations->push_back(params ? params : "{}");
+      result = "{}";
+    } else if (!current && gPageCommandIsolate && gGlue &&
+               !strcmp(command, "Target.evaluatePrivileged")) {
+      // Between tasks nothing has entered the page's isolate.
+      v8::Isolate* page = reinterpret_cast<v8::Isolate*>(gPageCommandIsolate);
+      v8::Isolate::Scope isolate_scope(page);
+      result = gGlue->run_command(gPageCommandIsolate, command, params);
+    } else if (!current) {
       result = CommandWithoutFrames(command);
     } else if (!gGlue) {
       result = "{\"error\":\"Command callback not installed\"}";
@@ -582,6 +598,18 @@ char* CommandCallback(const char* command, const char* params) {
 
 void RecordReplaySetGlue(const RecordReplayGlue* glue) { gGlue = glue; }
 
+void RecordReplaySetPageCommandIsolate(Isolate* isolate) {
+  gPageCommandIsolate = isolate;
+}
+
+const char* RecordReplayPendingPrivilegedEvaluation(size_t index) {
+  if (!gPendingPrivilegedEvaluations ||
+      index >= gPendingPrivilegedEvaluations->size()) {
+    return nullptr;
+  }
+  return (*gPendingPrivilegedEvaluations)[index].c_str();
+}
+
 void RecordReplayOnIsolateDispose(Isolate* isolate) {
   if (!recordreplay::IsRecordingOrReplaying()) return;
   // A replay is asked for each source's breakpoints when it reaches the end,
@@ -592,6 +620,7 @@ void RecordReplayOnIsolateDispose(Isolate* isolate) {
       if (entry.isolate == isolate) RememberBreakpoints(id, entry);
     }
   }
+  if (gPageCommandIsolate == isolate) gPageCommandIsolate = nullptr;
   if (gGlue) gGlue->on_isolate_dispose(isolate);
   if (!gScripts) return;
   for (auto it = gScripts->begin(); it != gScripts->end();) {
