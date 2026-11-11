@@ -54,6 +54,7 @@
 #include "src/inspector/v8-runtime-agent-impl.h"
 #include "src/inspector/v8-stack-trace-impl.h"
 #include "src/inspector/value-mirror.h"
+#include "src/replay/replay-internal.h"
 
 namespace v8 {
 namespace internal {
@@ -128,6 +129,7 @@ v8::MaybeLocal<v8::Script> V8InspectorImpl::compileScript(
     const String16& fileName) {
   v8::ScriptOrigin origin(toV8String(m_isolate, fileName), 0, 0, false);
   v8::ScriptCompiler::Source source(toV8String(m_isolate, code), origin);
+  v8::internal::RecordReplayDebuggerCompileScope debugger_compile;
   return v8::ScriptCompiler::Compile(context, &source,
                                      v8::ScriptCompiler::kNoCompileOptions);
 }

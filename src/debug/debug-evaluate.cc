@@ -25,6 +25,7 @@
 
 #if V8_ENABLE_WEBASSEMBLY
 #include "src/debug/debug-wasm-objects.h"
+#include "src/replay/replay-internal.h"
 #endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace v8 {
@@ -37,6 +38,7 @@ static MaybeDirectHandle<SharedFunctionInfo> GetFunctionInfo(
                                ScriptOriginOptions(true, true));
   script_details.repl_mode = repl_mode;
   ScriptCompiler::CompilationDetails compilation_details;
+  RecordReplayDebuggerCompileScope debugger_compile;
   return Compiler::GetSharedFunctionInfoForScript(
       isolate, source, script_details, ScriptCompiler::kNoCompileOptions,
       ScriptCompiler::kNoCacheNoReason, NOT_NATIVES_CODE, &compilation_details);

@@ -544,6 +544,18 @@ void RecordReplaySetReplacementScriptId(int script_id) {
   gReplacementScriptId = script_id;
 }
 
+namespace {
+thread_local int gDebuggerCompileDepth = 0;
+}  // namespace
+
+RecordReplayDebuggerCompileScope::RecordReplayDebuggerCompileScope() {
+  gDebuggerCompileDepth++;
+}
+RecordReplayDebuggerCompileScope::~RecordReplayDebuggerCompileScope() {
+  gDebuggerCompileDepth--;
+}
+bool RecordReplayIsDebuggerCompile() { return gDebuggerCompileDepth > 0; }
+
 int RecordReplayNextScriptId() {
   if (gReplacementScriptId) return gReplacementScriptId;
   if (recordreplay::IsMainThread() && !recordreplay::AreEventsDisallowed()) {

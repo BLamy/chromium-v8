@@ -60,6 +60,18 @@ V8_EXPORT_PRIVATE bool RecordReplayIgnoreScriptByURL(const char* url);
 V8_EXPORT_PRIVATE void RecordReplayRegisterScript(Isolate* isolate,
                                                   DirectHandle<Script> script);
 V8_EXPORT_PRIVATE int RecordReplayNextScriptId();
+
+// What a debugger compiles for itself isn't the program's: an expression a
+// DevTools client evaluates, or a function it calls on an object. A page that's
+// recorded while something drives it over DevTools would otherwise have each
+// of those as a source. They run on both sides all the same, as what DevTools
+// said is in the recording.
+class V8_EXPORT_PRIVATE V8_NODISCARD RecordReplayDebuggerCompileScope {
+ public:
+  RecordReplayDebuggerCompileScope();
+  ~RecordReplayDebuggerCompileScope();
+};
+V8_EXPORT_PRIVATE bool RecordReplayIsDebuggerCompile();
 // While set, the next script made gets this ID: a script compiled from
 // replaced source stands in for the one the recording has.
 V8_EXPORT_PRIVATE void RecordReplaySetReplacementScriptId(int script_id);

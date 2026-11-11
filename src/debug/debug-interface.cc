@@ -36,6 +36,7 @@
 #include "src/wasm/wasm-disassembler.h"
 #include "src/wasm/wasm-engine.h"
 #include "src/wasm/wasm-objects-inl.h"
+#include "src/replay/replay-internal.h"
 #endif  // V8_ENABLE_WEBASSEMBLY
 
 namespace v8 {
@@ -1077,6 +1078,7 @@ MaybeLocal<UnboundScript> CompileInspectorScript(Isolate* v8_isolate,
   {
     i::AlignedCachedData* cached_data = nullptr;
     ScriptCompiler::CompilationDetails compilation_details;
+    i::RecordReplayDebuggerCompileScope debugger_compile;
     i::MaybeDirectHandle<i::SharedFunctionInfo> maybe_function_info =
         i::Compiler::GetSharedFunctionInfoForScriptWithCachedData(
             isolate, str, i::ScriptDetails(), cached_data,
