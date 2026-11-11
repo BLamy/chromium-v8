@@ -4,6 +4,7 @@
 
 #include "src/base/logging.h"
 
+#include <dlfcn.h>
 #include <cctype>
 #include <cstdarg>
 #include <cstdio>
@@ -196,6 +197,26 @@ void V8_Fatal(const char* format, ...) {
   // Format the error message into a stack object for later retrieveal by the
   // crash processor.
   FailureMessage message(format, arguments);
+  // Replay: the message goes to the driver's log too, when there is a driver.
+  // A replaying process can't write to stderr, which isn't in its recording,
+  // so otherwise all a replay says of a failed check is that it tried to.
+  {
+    using ReplayPrint = void (*)(const char*, va_list);
+    static ReplayPrint replay_print =
+        reinterpret_cast<ReplayPrint>(dlsym(RTLD_DEFAULT, "RecordReplayPrint"));
+    if (replay_print) {
+      va_list unused;
+      va_start(unused, format);
+      auto print = [](ReplayPrint fn, const char* fmt, ...) {
+        va_list args;
+        va_start(args, fmt);
+        fn(fmt, args);
+        va_end(args);
+      };
+      print(replay_print, "V8 fatal error: %s", message.message_);
+      va_end(unused);
+    }
+  }
   va_end(arguments);
 
   if (v8::base::g_fatal_function != nullptr) {

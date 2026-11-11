@@ -1152,6 +1152,8 @@ Variable* DeclarationScope::DeclareParameter(const AstRawString* name,
   // upstream Replay's V8 (RUN-2604), which found no way to leave leaf
   // functions out at this level either.
   if (recordreplay::IsReplaying()) {
+    // V8 checks that a variable forced into a context is one that's used.
+    var->set_is_used();
     var->ForceContextAllocation();
   }
   return var;
@@ -1265,6 +1267,8 @@ Variable* Scope::DeclareVariable(
   // As in DeclarationScope::DeclareParameter().
   if (recordreplay::IsReplaying() &&
       (kind == NORMAL_VARIABLE || kind == SLOPPY_BLOCK_FUNCTION_VARIABLE)) {
+    // V8 checks that a variable forced into a context is one that's used.
+    var->set_is_used();
     var->ForceContextAllocation();
   }
 
