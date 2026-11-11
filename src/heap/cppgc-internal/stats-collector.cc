@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/replay/replay.h"
 #include "src/heap/cppgc-internal/stats-collector.h"
 
 #include <algorithm>
@@ -70,6 +71,9 @@ void StatsCollector::NotifySafePointForTesting() {
 }
 
 void StatsCollector::AllocatedObjectSizeSafepointImpl() {
+  // Replay: observers here can start a collection.
+  v8::replayio::AutoDisallowEvents disallow_events(
+      "cppgc::StatsCollector::AllocatedObjectSizeSafepointImpl");
   allocated_bytes_since_end_of_marking_ +=
       static_cast<int64_t>(allocated_bytes_since_safepoint_) -
       static_cast<int64_t>(explicitly_freed_bytes_since_safepoint_);

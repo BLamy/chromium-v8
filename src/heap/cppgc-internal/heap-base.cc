@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/replay/replay.h"
 #include "src/heap/cppgc-internal/heap-base.h"
 
 #include <algorithm>
@@ -285,6 +286,9 @@ void HeapBase::ResetRememberedSet() {
 #endif  // defined(CPPGC_YOUNG_GENERATION)
 
 void HeapBase::Terminate() {
+  // Replay: the pre-finalizers run here are of whatever earlier collections
+  // left alive, which differs on a replay.
+  v8::replayio::AutoDisallowEvents disallow_events("cppgc::HeapBase::Terminate");
   CHECK(!IsMarking());
   CHECK(!IsGCForbidden());
   // Cannot use IsGCAllowed() as `Terminate()` will be invoked after detaching

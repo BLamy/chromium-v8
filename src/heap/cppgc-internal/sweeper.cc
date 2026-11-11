@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "src/replay/replay.h"
 #include "src/heap/cppgc-internal/sweeper.h"
 
 #include <algorithm>
@@ -986,6 +987,10 @@ class Sweeper::SweeperImpl final {
   ~SweeperImpl() { CancelAllSweepingTasks(); }
 
   void Start(SweepingConfig config) {
+    // Replay: what a sweep finalizes, and when, goes by the heap's layout, which
+    // isn't the same on a replay whose debugger has allocated at a pause. A
+    // finalizer can close a Mojo pipe or post a task, so none of it is recorded.
+    v8::replayio::AutoDisallowEvents disallow_events("cppgc::Sweeper::Start");
     StatsCollector::EnabledScope stats_scope(stats_collector_,
                                              StatsCollector::kAtomicSweep);
     is_in_progress_ = true;
@@ -1196,6 +1201,8 @@ class Sweeper::SweeperImpl final {
 
   bool SweepForAllocationIfRunning(BaseSpace* space, size_t size,
                                    v8::base::TimeDelta max_duration) {
+    v8::replayio::AutoDisallowEvents disallow_events(
+        "cppgc::Sweeper::SweepForAllocationIfRunning");
     if (!is_in_progress_) {
       return false;
     }
@@ -1212,6 +1219,8 @@ class Sweeper::SweeperImpl final {
   }
 
   bool FinishIfRunning() {
+    v8::replayio::AutoDisallowEvents disallow_events(
+        "cppgc::Sweeper::FinishIfRunning");
     if (!is_in_progress_) {
       return false;
     }
@@ -1247,6 +1256,8 @@ class Sweeper::SweeperImpl final {
   }
 
   void FinishIfOutOfWork() {
+    v8::replayio::AutoDisallowEvents disallow_events(
+        "cppgc::Sweeper::FinishIfOutOfWork");
     if (!is_in_progress_ || is_sweeping_on_mutator_thread_) {
       return;
     }
@@ -1288,6 +1299,7 @@ class Sweeper::SweeperImpl final {
   }
 
   void Finish() {
+    v8::replayio::AutoDisallowEvents disallow_events("cppgc::Sweeper::Finish");
     DCHECK(is_in_progress_);
 
     MutatorThreadSweepingScope sweeping_in_progress(*this);
@@ -1353,6 +1365,8 @@ class Sweeper::SweeperImpl final {
   bool PerformSweepOnMutatorThread(v8::base::TimeDelta max_duration,
                                    StatsCollector::ScopeId internal_scope_id,
                                    MutatorThreadSweepingMode sweeping_mode) {
+    v8::replayio::AutoDisallowEvents disallow_events(
+        "cppgc::Sweeper::PerformSweepOnMutatorThread");
     if (!is_in_progress_) return true;
 
     MutatorThreadSweepingScope sweeping_in_progress(*this);
