@@ -6687,6 +6687,9 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
 
   initialized_ = true;
 
+  // See RecordReplayShouldCallOnPromiseHook.
+  if (RecordReplayShouldCallOnPromiseHook()) PromiseHookStateUpdated();
+
   return true;
 }
 
@@ -7289,7 +7292,8 @@ void Isolate::UpdatePromiseHookProtector() {
 void Isolate::PromiseHookStateUpdated() {
   promise_hook_flags_ =
       (promise_hook_flags_ & PromiseHookFields::HasContextPromiseHook::kMask) |
-      PromiseHookFields::HasIsolatePromiseHook::encode(promise_hook_) |
+      PromiseHookFields::HasIsolatePromiseHook::encode(
+          promise_hook_ || RecordReplayShouldCallOnPromiseHook()) |
       PromiseHookFields::HasAsyncEventDelegate::encode(async_event_delegate_) |
       PromiseHookFields::IsDebugActive::encode(debug()->is_active());
 
@@ -7764,6 +7768,10 @@ void Isolate::RunPromiseHook(PromiseHookType type,
                              DirectHandle<JSPromise> promise,
                              DirectHandle<Object> parent) {
   if (!HasIsolatePromiseHooks()) return;
+  if (RecordReplayShouldCallOnPromiseHook()) {
+    RecordReplayOnPromiseHook(this, type, promise, parent);
+    if (!promise_hook_) return;
+  }
   DCHECK(promise_hook_ != nullptr);
   promise_hook_(type, v8::Utils::ToLocal(promise), v8::Utils::ToLocal(parent));
 }

@@ -47,10 +47,21 @@ let gNextObjectId = 1;
 // call frames. Without this a replay's heap grows with every read until V8 runs out.
 const ObjectGroup = "replay";
 
+// Objects a client is told about that the inspector never wrapped: a CSS rule
+// as the inspector's CSS agent describes it has no object of the page's behind
+// it. Protocol ObjectId => { className, preview }.
+const gSyntheticObjects = new Map();
+
+// The embedder's script for a page's DOM, and what it's given to work with.
+// Made when a command or a preview first needs it, for one pause.
+let gDomBundle;
+
 function clearPauseDataCallback() {
   gProtocolIdToObject.clear();
   gObjectIdToProtocolId.clear();
   gProtocolIdToScope.clear();
+  gSyntheticObjects.clear();
+  gDomBundle = undefined;
   gNextObjectId = 1;
   sendMessage("Runtime.releaseObjectGroup", { objectGroup: ObjectGroup });
   sendMessage("Runtime.releaseObjectGroup", { objectGroup: "backtrace" });
@@ -75,6 +86,67 @@ function protocolIdToRemoteObject(objectId) {
   const remoteObject = gProtocolIdToObject.get(objectId);
   assert(remoteObject);
   return remoteObject;
+}
+
+// The ID a client knows one of the page's objects by.
+function registerPlainObject(plainObject) {
+  const text = rr.wrapValue(plainObject);
+  if (!text) {
+    return undefined;
+  }
+  const remoteObject = JSON.parse(text);
+  return remoteObject.objectId ? remoteObjectToProtocolId(remoteObject) : undefined;
+}
+
+// The page's object for an ID, or undefined when the ID isn't for one.
+function getPlainObjectByProtocolId(objectId) {
+  const remoteObject = gProtocolIdToObject.get(String(objectId));
+  return remoteObject ? rr.unwrapObject(remoteObject.objectId) : undefined;
+}
+
+// Gives a description that has no object of the inspector's behind it an ID,
+// or the ID of |plainObject| when that already has one.
+function registerSyntheticObject(synthetic, plainObject) {
+  let objectId = plainObject && registerPlainObject(plainObject);
+  if (!objectId) {
+    objectId = (gNextObjectId++).toString();
+  }
+  synthetic.objectId = objectId;
+  gSyntheticObjects.set(objectId, synthetic);
+  return objectId;
+}
+
+function parseOrNull(text) {
+  return typeof text == "string" && text ? JSON.parse(text) : null;
+}
+
+function getDomBundle() {
+  if (gDomBundle === undefined) {
+    gDomBundle = null;
+    if (rr.domBundle) {
+      gDomBundle = rr.domBundle({
+        registerPlainObject,
+        getPlainObjectByRrpId: getPlainObjectByProtocolId,
+        registerRrpPreview: registerSyntheticObject,
+        log,
+        layoutDom: rr.domLayout,
+        fromJsIsBlinkObject: value => !!rr.domClassify(value),
+        fromJsIsBlinkNodeObject: value => {
+          const kind = rr.domClassify(value);
+          return kind == "node" || kind == "element";
+        },
+        fromJsIsBlinkElementObject: value => rr.domClassify(value) == "element",
+        fromJsIsBlinkCSSStyleDeclarationObject: value => rr.domClassify(value) == "style",
+        fromJsGetBoxModel: node => parseOrNull(rr.domBoxModel(node)),
+        fromJsGetMatchedStylesForElement: node => parseOrNull(rr.cssMatchedStyles(node)),
+        fromJsCssGetStylesheetByCpdId: id => rr.cssStyleSheet(id),
+        fromJsCollectEventListeners: node => rr.domEventListeners(node),
+        fromJsDomPerformSearch: query => rr.domSearch(query),
+        fromJsGetDevicePixelRatio: rr.devicePixelRatio,
+      }) || null;
+    }
+  }
+  return gDomBundle;
 }
 
 // Strings longer than this will be truncated when creating protocol values.
@@ -132,6 +204,14 @@ function protocolIdToScope(scopeId) {
 
 
 function createProtocolObject(objectId, level) {
+  const synthetic = gSyntheticObjects.get(objectId);
+  if (synthetic) {
+    return {
+      objectId,
+      className: synthetic.className,
+      preview: level != "none" ? synthetic.preview : undefined,
+    };
+  }
   const obj = protocolIdToRemoteObject(objectId);
   const className = obj.subtype == "proxy" ? "Proxy" : (obj.className || "Function");
 
@@ -184,6 +264,53 @@ ProtocolObjectPreview.prototype = {
     this.properties.push(property);
   },
 
+  // What a proxy wraps, how a promise stands, and for one of the page's DOM
+  // objects what the page says of it.
+  getExtraData(allProperties) {
+    const internal = name => {
+      const found = (allProperties.internalProperties || []).find(p => p.name == name);
+      return found && found.value;
+    };
+    if (this.obj.subtype == "proxy") {
+      const target = internal("[[Target]]");
+      const handler = internal("[[Handler]]");
+      if (target && handler) {
+        return {
+          proxyState: {
+            target: remoteObjectToProtocolValue(target),
+            handler: remoteObjectToProtocolValue(handler),
+          },
+        };
+      }
+      return undefined;
+    }
+    if (this.obj.subtype == "promise") {
+      const state = internal("[[PromiseState]]");
+      const value = internal("[[PromiseResult]]");
+      const promiseState = { state: (state && state.value) || undefined };
+      if (promiseState.state !== "pending" && value) {
+        promiseState.value = remoteObjectToProtocolValue(value);
+      }
+      return { promiseState };
+    }
+    if (!rr.domClassify) {
+      return undefined;
+    }
+    const plainObject = rr.unwrapObject(this.obj.objectId);
+    const kind = rr.domClassify(plainObject);
+    if (!kind) {
+      return undefined;
+    }
+    const bundle = getDomBundle();
+    if (!bundle) {
+      return undefined;
+    }
+    if (kind == "style") {
+      return { style: bundle.previewBlinkStyle(plainObject) };
+    }
+    return { node: bundle.previewBlinkNode(plainObject) };
+  },
+
   addContainerEntry(entry) {
     if (!this.canAddItem()) {
       return;
@@ -230,6 +357,7 @@ ProtocolObjectPreview.prototype = {
     if (prototype && prototype.value && prototype.value.objectId) {
       prototypeId = remoteObjectToProtocolId(prototype.value);
     }
+    Object.assign(this.extra, this.getExtraData(allProperties) || {});
     return {
       prototypeId,
       overflow: (this.overflow && this.level != "full") ? true : undefined,
@@ -491,7 +619,12 @@ const CommandCallbacks = {
 };
 
 function commandCallback(method, paramsText) {
-  const callback = CommandCallbacks[method];
+  let callback = CommandCallbacks[method];
+  if (!callback && (method.startsWith("DOM.") || method.startsWith("CSS.") ||
+                    method.startsWith("Graphics."))) {
+    const bundle = getDomBundle();
+    callback = bundle && bundle.commands[method];
+  }
   if (!callback) {
     // The embedder has commands of its own, which it answers in the page.
     const answer = rr.pageCommand(method, paramsText || "{}");

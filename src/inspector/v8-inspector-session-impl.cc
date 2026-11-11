@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <string>
+#include <vector>
+
 #include "src/inspector/v8-inspector-session-impl.h"
 
 #include "../../third_party/inspector_protocol/crdtp/cbor.h"
@@ -26,6 +29,7 @@
 #include "src/inspector/v8-profiler-agent-impl.h"
 #include "src/inspector/v8-runtime-agent-impl.h"
 #include "src/inspector/v8-schema-agent-impl.h"
+#include "src/replay/replay.h"
 
 namespace v8_inspector {
 namespace {
@@ -194,13 +198,61 @@ std::unique_ptr<StringBuffer> V8InspectorSessionImpl::serializeForFrontend(
   return StringBufferFrom(std::move(json));
 }
 
+namespace {
+
+// Marks a protocol message in the recording: what a debugger or a test runner
+// attached to the page asked and was told. Not the replay's own session, whose
+// messages come with events disallowed. |get_cbor| is only called when
+// replaying, which is the only time what the message said is wanted.
+template <typename GetCbor>
+void RecordReplayMessageAnnotation(const char* kind,
+                                   int context_group_id,
+                                   int session_id,
+                                   GetCbor get_cbor) {
+  if (!v8::recordreplay::IsRecordingOrReplaying() ||
+      !v8::recordreplay::IsMainThread() ||
+      v8::recordreplay::AreEventsDisallowed()) {
+    return;
+  }
+  std::string json;
+  if (v8::recordreplay::IsReplaying()) {
+    v8::recordreplay::BeginDisallowEvents("RecordReplayMessageAnnotation");
+    std::vector<uint8_t> out;
+    v8_crdtp::span<uint8_t> cbor = get_cbor();
+    if (ConvertCBORToJSON(cbor, &out).ok()) {
+      json.assign(out.begin(), out.end());
+    }
+    v8::recordreplay::EndDisallowEvents();
+    if (!json.empty() && json.back() == '}') {
+      json.pop_back();
+      json += ",\"contextGroupId\":" + std::to_string(context_group_id) +
+              ",\"sessionId\":" + std::to_string(session_id) + "}";
+    }
+  }
+  v8::recordreplay::OnAnnotation(kind, json.c_str());
+}
+
+}  // namespace
+
 void V8InspectorSessionImpl::SendProtocolResponse(
     int callId, std::unique_ptr<protocol::Serializable> message) {
+  std::vector<uint8_t> record_replay_cbor;
+  RecordReplayMessageAnnotation("inspector-protocol-response",
+                                m_contextGroupId, m_sessionId, [&]() {
+                                  record_replay_cbor = message->Serialize();
+                                  return v8_crdtp::SpanFrom(record_replay_cbor);
+                                });
   m_channel->sendResponse(callId, serializeForFrontend(std::move(message)));
 }
 
 void V8InspectorSessionImpl::SendProtocolNotification(
     std::unique_ptr<protocol::Serializable> message) {
+  std::vector<uint8_t> record_replay_cbor;
+  RecordReplayMessageAnnotation("inspector-protocol-notification",
+                                m_contextGroupId, m_sessionId, [&]() {
+                                  record_replay_cbor = message->Serialize();
+                                  return v8_crdtp::SpanFrom(record_replay_cbor);
+                                });
   m_channel->sendNotification(serializeForFrontend(std::move(message)));
 }
 
@@ -406,6 +458,9 @@ void V8InspectorSessionImpl::dispatchProtocolMessage(
     }
     cbor = SpanFrom(converted_cbor);
   }
+  RecordReplayMessageAnnotation("inspector-protocol-dispatch",
+                                m_contextGroupId, m_sessionId,
+                                [&]() { return cbor; });
   std::string associated_data_copy;
   std::string_view associated_data_view;
   if (associated_data.is8Bit()) {

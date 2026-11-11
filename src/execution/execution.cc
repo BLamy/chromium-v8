@@ -18,6 +18,7 @@
 #include "src/wasm/wasm-constants.h"
 #include "src/wasm/wasm-engine-globals.h"
 #endif  // V8_ENABLE_WEBASSEMBLY
+#include "src/replay/replay-internal.h"
 
 namespace v8 {
 namespace internal {
@@ -337,6 +338,9 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> Invoke(Isolate* isolate,
   // through JS to set up a frame for break-at-entry.
   if (IsJSFunction(*params.target)) {
     auto function = Cast<JSFunction>(params.target);
+    if (gWarnMissingDependencyExecution) {
+      RecordReplayCheckDependencyExecution(isolate, function);
+    }
     if ((!params.is_construct || IsConstructor(*function)) &&
         function->shared()->IsApiFunction() &&
         !function->shared()->BreakAtEntry(isolate)) {

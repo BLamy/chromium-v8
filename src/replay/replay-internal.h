@@ -10,6 +10,7 @@
 
 #include <string>
 
+#include "include/v8-promise.h"
 #include "src/handles/handles.h"
 #include "src/replay/replay.h"
 
@@ -17,6 +18,9 @@ namespace v8 {
 namespace internal {
 
 class Isolate;
+class JSFunction;
+class JSPromise;
+class Object;
 class Script;
 class SharedFunctionInfo;
 
@@ -53,6 +57,19 @@ std::string GetRecordReplayFunctionId(Tagged<SharedFunctionInfo> shared);
 void ParseRecordReplayFunctionId(const std::string& function_id, int* script_id,
                                  int* source_position);
 V8_EXPORT_PRIVATE void RecordReplayOnExceptionUnwind(Isolate* isolate);
+
+// Promises are part of the dependency graph a replay builds, which takes a
+// promise hook. The hook is there while recording too, so that promises take
+// the same paths on both sides, and does nothing then.
+bool RecordReplayShouldCallOnPromiseHook();
+void RecordReplayOnPromiseHook(Isolate* isolate, v8::PromiseHookType type,
+                               DirectHandle<JSPromise> promise,
+                               DirectHandle<Object> parent);
+// |promise| was resolved with |resolution|, a thenable, and settles when that
+// does.
+void RecordReplayOnPromiseAdoption(Isolate* isolate,
+                                   DirectHandle<JSPromise> promise,
+                                   DirectHandle<Object> resolution);
 
 // replay-debug.cc
 V8_EXPORT_PRIVATE bool RecordReplayShouldEmitOpcodes(bool record_replay_ignore);
@@ -101,6 +118,26 @@ struct RecordReplayGlue {
   void (*on_isolate_dispose)(Isolate* isolate);
 };
 V8_EXPORT_PRIVATE void RecordReplaySetGlue(const RecordReplayGlue* glue);
+
+// Called for each of the program's scripts that names a source map, as the
+// script is registered. It mustn't run JS: the script is still being compiled.
+using RecordReplayNewScriptCallback = void (*)(v8::Isolate* isolate,
+                                               int script_id,
+                                               const char* url,
+                                               const char* source_map_url);
+V8_EXPORT_PRIVATE void RecordReplaySetNewScriptCallback(
+    RecordReplayNewScriptCallback callback);
+V8_EXPORT_PRIVATE bool RecordReplayScriptSource(int script_id,
+                                                std::string* source);
+
+// Answers a command the embedder registered for, if it is one.
+bool RecordReplayEmbedderCommand(const char* command, const char* params,
+                                 std::string* result);
+
+// Set when the process attaches, from RECORD_REPLAY_WARN_MISSING_EXECUTION.
+extern bool gWarnMissingDependencyExecution;
+void RecordReplayCheckDependencyExecution(Isolate* isolate,
+                                          DirectHandle<JSFunction> function);
 
 // The isolate whose embedder answers commands in a page, once there is one.
 V8_EXPORT_PRIVATE void RecordReplaySetPageCommandIsolate(Isolate* isolate);

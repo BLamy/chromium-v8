@@ -556,6 +556,10 @@ RecordReplayDebuggerCompileScope::~RecordReplayDebuggerCompileScope() {
 }
 bool RecordReplayIsDebuggerCompile() { return gDebuggerCompileDepth > 0; }
 
+namespace {
+RecordReplayNewScriptCallback gNewScriptCallback = nullptr;
+}  // namespace
+
 int RecordReplayNextScriptId() {
   if (gReplacementScriptId) return gReplacementScriptId;
   if (recordreplay::IsMainThread() && !recordreplay::AreEventsDisallowed()) {
@@ -597,6 +601,28 @@ void RecordReplayRegisterScript(Isolate* isolate, DirectHandle<Script> script) {
   }
   RecordReplayOnNewSource(id.c_str(), "scriptSource",
                           url.empty() ? nullptr : url.c_str());
+
+  // The embedder saves a script's source map while the map can still be had.
+  if (gNewScriptCallback && IsString(script->source_mapping_url())) {
+    std::string map_url =
+        Cast<String>(script->source_mapping_url())->ToCString().get();
+    if (!map_url.empty()) {
+      gNewScriptCallback(reinterpret_cast<v8::Isolate*>(isolate), script->id(),
+                         url.c_str(), map_url.c_str());
+    }
+  }
+}
+
+void RecordReplaySetNewScriptCallback(RecordReplayNewScriptCallback callback) {
+  gNewScriptCallback = callback;
+}
+
+// The text of a registered script, as it was compiled.
+bool RecordReplayScriptSource(int script_id, std::string* source) {
+  const RegisteredScript* entry = FindScript(script_id);
+  if (!entry || !IsString(entry->script->source())) return false;
+  *source = Cast<String>(entry->script->source())->ToCString().get();
+  return true;
 }
 
 char* CommandCallback(const char* command, const char* params) {
@@ -627,6 +653,8 @@ char* CommandCallback(const char* command, const char* params) {
     result = "{}";
   } else if (!strcmp(command, "Target.getStackFunctionIDs")) {
     result = CommandGetStackFunctionIds();
+  } else if (RecordReplayEmbedderCommand(command, params, &result)) {
+    // Answered.
   } else {
     v8::Isolate* current = v8::Isolate::TryGetCurrent();
     if (!gPageCommandIsolate && !strcmp(command, "Target.evaluatePrivileged")) {

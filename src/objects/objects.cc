@@ -114,6 +114,7 @@
 #include "src/objects/js-segmenter.h"
 #include "src/objects/js-segments.h"
 #endif  // V8_INTL_SUPPORT
+#include "src/replay/replay-internal.h"
 
 namespace v8::internal {
 
@@ -4856,6 +4857,10 @@ MaybeHandle<Object> JSPromise::Resolve(DirectHandle<JSPromise> promise,
   if (!IsCallable(*then_action)) {
     // a. Return FulfillPromise(promise, resolution).
     return Fulfill(promise, resolution_recv);
+  }
+
+  if (RecordReplayShouldCallOnPromiseHook()) {
+    RecordReplayOnPromiseAdoption(isolate, promise, resolution_recv);
   }
 
   // 13. Let job be NewPromiseResolveThenableJob(promise, resolution,

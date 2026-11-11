@@ -224,6 +224,60 @@ void NativeCurrentConsoleCall(const v8::FunctionCallbackInfo<v8::Value>& info) {
   info.GetReturnValue().Set(ToV8String(isolate, json));
 }
 
+// The inspector's description of any value, as JSON, for the glue to give an
+// ID to. The embedder hands the glue page objects this way.
+void NativeWrapValue(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  IsolateGlue* glue = (*gGlue)[isolate];
+  v8::Local<v8::Value> value = info[0];
+  // An object is described where it was made, which is a context the
+  // inspector may not have been told about yet.
+  v8::Local<v8::Context> context = isolate->GetCurrentContext();
+  if (value->IsObject()) {
+    v8::Local<v8::Context> creation;
+    if (value.As<v8::Object>()->GetCreationContext(isolate).ToLocal(&creation)) {
+      context = creation;
+    }
+  }
+  RegisterContext(glue, context);
+  static const char kGroup[] = "replay";
+  auto remote = glue->session->wrapObject(
+      context, value,
+      v8_inspector::StringView(reinterpret_cast<const uint8_t*>(kGroup),
+                               sizeof(kGroup) - 1),
+      false);
+  if (!remote) return;
+  std::vector<uint8_t> cbor;
+  remote->AppendSerialized(&cbor);
+  std::vector<uint8_t> text;
+  v8_crdtp::json::ConvertCBORToJSON(v8_crdtp::SpanFrom(cbor), &text);
+  info.GetReturnValue().Set(ToV8String(
+      isolate,
+      std::string(reinterpret_cast<const char*>(text.data()), text.size())));
+}
+
+// The value the inspector gave an object ID to.
+void NativeUnwrapObject(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  IsolateGlue* glue = (*gGlue)[isolate];
+  v8::String::Utf8Value id(isolate, info[0]);
+  std::unique_ptr<v8_inspector::StringBuffer> error;
+  v8::Local<v8::Value> value;
+  v8::Local<v8::Context> context;
+  if (*id && glue->session->unwrapObject(
+                 &error,
+                 v8_inspector::StringView(
+                     reinterpret_cast<const uint8_t*>(*id), id.length()),
+                 &value, &context, nullptr)) {
+    info.GetReturnValue().Set(value);
+  }
+}
+
+// Gives the glue of an isolate the natives the embedder has for it.
+void (*gGlueNativesInstaller)(v8::Isolate* isolate,
+                              v8::Local<v8::Context> context,
+                              v8::Local<v8::Object> rr) = nullptr;
+
 void AddNative(v8::Isolate* isolate, v8::Local<v8::Context> context,
                v8::Local<v8::Object> object, const char* name,
                v8::FunctionCallback callback) {
@@ -266,6 +320,9 @@ IsolateGlue* EnsureGlue(v8::Isolate* isolate) {
   AddNative(isolate, context, rr, "pageCommand", NativePageCommand);
   AddNative(isolate, context, rr, "currentPageError", NativeCurrentPageError);
   AddNative(isolate, context, rr, "currentConsoleCall", NativeCurrentConsoleCall);
+  AddNative(isolate, context, rr, "wrapValue", NativeWrapValue);
+  AddNative(isolate, context, rr, "unwrapObject", NativeUnwrapObject);
+  if (gGlueNativesInstaller) gGlueNativesInstaller(isolate, context, rr);
 
   v8::TryCatch try_catch(isolate);
   v8::Local<v8::UnboundScript> unbound;
@@ -312,6 +369,18 @@ void RegisterStackContexts(Isolate* isolate, IsolateGlue* glue) {
 }
 
 }  // namespace
+
+v8_inspector::V8InspectorSession* RecordReplayGlueSession(
+    v8::Isolate* isolate) {
+  v8::HandleScope handles(isolate);
+  return EnsureGlue(isolate)->session.get();
+}
+
+void RecordReplaySetGlueNativesInstaller(
+    void (*installer)(v8::Isolate*, v8::Local<v8::Context>,
+                      v8::Local<v8::Object>)) {
+  gGlueNativesInstaller = installer;
+}
 
 void RecordReplayClearGluePauseData(Isolate* i_isolate);
 
@@ -489,4 +558,264 @@ extern "C" V8_EXPORT void V8RecordReplayOnPageError(const char* message,
   v8::internal::RecordReplayOnConsoleMessage(
       v8::internal::RecordReplayNewBookmark());
   v8::internal::RecordReplaySetCurrentPageError(nullptr);
+}
+
+
+// The dependency graph a replay builds. The embedder has the functions that
+// add to it, and gives them to V8 for what V8 knows about: promises.
+namespace v8 {
+namespace internal {
+namespace {
+
+struct DependencyGraphFunctions {
+  bool (*enabled)() = nullptr;
+  int (*new_node)(const char* json) = nullptr;
+  void (*add_edge)(int source, int target, const char* json) = nullptr;
+  void (*begin_execution)(int node) = nullptr;
+  void (*end_execution)() = nullptr;
+  int (*execution_node)() = nullptr;
+};
+DependencyGraphFunctions gDependencyGraph;
+
+int (*gApiObjectId)(v8::Local<v8::Object> object) = nullptr;
+
+// Commands the embedder answers, with a string the caller frees.
+std::map<std::string, char* (*)(const char* params)>* gEmbedderCommands =
+    nullptr;
+
+// Tables keyed weakly by object, each for the main thread's isolate, which is
+// the first to use one.
+struct WeakIntTable {
+  v8::Global<v8::debug::EphemeronTable> table;
+
+  int Get(v8::Isolate* isolate, v8::Local<v8::Value> key) {
+    if (table.IsEmpty()) return 0;
+    v8::Local<v8::Value> value;
+    if (!table.Get(isolate)->Get(isolate, key).ToLocal(&value) ||
+        !value->IsInt32()) {
+      return 0;
+    }
+    return value.As<v8::Int32>()->Value();
+  }
+
+  void Set(v8::Isolate* isolate, v8::Local<v8::Value> key, int value) {
+    v8::Local<v8::debug::EphemeronTable> current =
+        table.IsEmpty() ? v8::debug::EphemeronTable::New(isolate)
+                        : table.Get(isolate);
+    table.Reset(isolate,
+                current->Set(isolate, key, v8::Integer::New(isolate, value)));
+  }
+};
+
+v8::Isolate* gObjectIdIsolate = nullptr;
+WeakIntTable* gObjectIds = nullptr;
+WeakIntTable* gPromiseNewNodes = nullptr;
+WeakIntTable* gPromiseSettledNodes = nullptr;
+int gNextObjectId = 1;
+
+bool UseObjectTables(v8::Isolate* isolate) {
+  if (!v8::recordreplay::IsMainThread()) return false;
+  if (!gObjectIdIsolate) {
+    gObjectIdIsolate = isolate;
+    gObjectIds = new WeakIntTable();
+    gPromiseNewNodes = new WeakIntTable();
+    gPromiseSettledNodes = new WeakIntTable();
+  }
+  return gObjectIdIsolate == isolate;
+}
+
+bool DependencyGraphEnabled() {
+  return gDependencyGraph.enabled && gDependencyGraph.enabled();
+}
+
+}  // namespace
+
+bool gWarnMissingDependencyExecution = false;
+
+// An ID for an object, the same for as long as the object lives. An object of
+// the embedder's has the one the embedder gave it.
+int RecordReplayObjectId(v8::Isolate* isolate, v8::Local<v8::Value> value,
+                         bool allow_create) {
+  if (!value->IsObject()) return 0;
+  if (gApiObjectId) {
+    if (int id = gApiObjectId(value.As<v8::Object>())) return id;
+  }
+  if (!UseObjectTables(isolate)) return 0;
+  v8::HandleScope scope(isolate);
+  if (int id = gObjectIds->Get(isolate, value)) return id;
+  if (!allow_create) return 0;
+  int id = gNextObjectId++;
+  gObjectIds->Set(isolate, value, id);
+  return id;
+}
+
+bool RecordReplayShouldCallOnPromiseHook() {
+  return recordreplay::IsRecordingOrReplaying() && recordreplay::IsMainThread();
+}
+
+void RecordReplayOnPromiseHook(Isolate* isolate, PromiseHookType type,
+                               DirectHandle<JSPromise> promise,
+                               DirectHandle<Object> parent) {
+  if (!DependencyGraphEnabled()) return;
+  v8::Isolate* v8_isolate = reinterpret_cast<v8::Isolate*>(isolate);
+  if (!UseObjectTables(v8_isolate)) return;
+  v8::HandleScope scope(v8_isolate);
+  v8::Local<v8::Value> key = v8::Utils::ToLocal(promise);
+
+  switch (type) {
+    case PromiseHookType::kInit: {
+      if (gPromiseNewNodes->Get(v8_isolate, key)) break;
+      std::string json =
+          "{\"kind\":\"newPromise\",\"persistentId\":" +
+          std::to_string(RecordReplayObjectId(v8_isolate, key, true)) + "}";
+      int node = gDependencyGraph.new_node(json.c_str());
+      gPromiseNewNodes->Set(v8_isolate, key, node);
+      if (IsJSPromise(*parent)) {
+        int parent_node =
+            gPromiseNewNodes->Get(v8_isolate, v8::Utils::ToLocal(parent));
+        if (parent_node) {
+          gDependencyGraph.add_edge(parent_node, node,
+                                    "{\"kind\":\"parentPromise\"}");
+        }
+      }
+      break;
+    }
+    case PromiseHookType::kResolve: {
+      int node = gPromiseNewNodes->Get(v8_isolate, key);
+      if (!node || gPromiseSettledNodes->Get(v8_isolate, key)) break;
+      int settled = gDependencyGraph.new_node("{\"kind\":\"promiseSettled\"}");
+      gPromiseSettledNodes->Set(v8_isolate, key, settled);
+      gDependencyGraph.add_edge(node, settled, "{\"kind\":\"basePromise\"}");
+      break;
+    }
+    case PromiseHookType::kBefore: {
+      int settled = gPromiseSettledNodes->Get(v8_isolate, key);
+      gDependencyGraph.begin_execution(
+          settled ? settled : gPromiseNewNodes->Get(v8_isolate, key));
+      break;
+    }
+    case PromiseHookType::kAfter:
+      gDependencyGraph.end_execution();
+      break;
+  }
+}
+
+// With RECORD_REPLAY_WARN_MISSING_EXECUTION set, says which of the program's
+// functions were called while no node of the graph was executing, which is a
+// place the graph has no account of.
+void RecordReplayCheckDependencyExecution(Isolate* isolate,
+                                          DirectHandle<JSFunction> function) {
+  if (!gWarnMissingDependencyExecution || !recordreplay::IsReplaying() ||
+      !recordreplay::IsMainThread() || recordreplay::AreEventsDisallowed() ||
+      !DependencyGraphEnabled() || !gDependencyGraph.execution_node ||
+      gDependencyGraph.execution_node() != 0 ||
+      !IsScript(function->shared()->script())) {
+    return;
+  }
+  recordreplay::Print("DependencyGraphMissingExecution %s",
+                      GetRecordReplayFunctionId(function->shared()).c_str());
+}
+
+void RecordReplayOnPromiseAdoption(Isolate* isolate,
+                                   DirectHandle<JSPromise> promise,
+                                   DirectHandle<Object> resolution) {
+  if (!DependencyGraphEnabled() || !IsJSPromise(*resolution)) return;
+  v8::Isolate* v8_isolate = reinterpret_cast<v8::Isolate*>(isolate);
+  if (!UseObjectTables(v8_isolate)) return;
+  v8::HandleScope scope(v8_isolate);
+  int settled =
+      gPromiseSettledNodes->Get(v8_isolate, v8::Utils::ToLocal(promise));
+  int adopted =
+      gPromiseNewNodes->Get(v8_isolate, v8::Utils::ToLocal(resolution));
+  if (settled && adopted) {
+    gDependencyGraph.add_edge(settled, adopted,
+                              "{\"kind\":\"adoptedPromise\"}");
+  }
+}
+
+}  // namespace internal
+}  // namespace v8
+
+extern "C" V8_EXPORT void V8RecordReplaySetDependencyGraphFunctions(
+    bool (*enabled)(),
+    int (*new_node)(const char* json),
+    void (*add_edge)(int source, int target, const char* json),
+    void (*begin_execution)(int node),
+    void (*end_execution)(),
+    int (*execution_node)()) {
+  v8::internal::gDependencyGraph.execution_node = execution_node;
+  v8::internal::gDependencyGraph.enabled = enabled;
+  v8::internal::gDependencyGraph.new_node = new_node;
+  v8::internal::gDependencyGraph.add_edge = add_edge;
+  v8::internal::gDependencyGraph.begin_execution = begin_execution;
+  v8::internal::gDependencyGraph.end_execution = end_execution;
+}
+
+// The embedder's own ID for one of its objects, or zero.
+extern "C" V8_EXPORT void V8RecordReplaySetApiObjectIdCallback(
+    int (*callback)(v8::Local<v8::Object> object)) {
+  v8::internal::gApiObjectId = callback;
+}
+
+extern "C" V8_EXPORT int V8RecordReplayObjectId(v8::Isolate* isolate,
+                                                v8::Local<v8::Value> value,
+                                                bool allow_create) {
+  return v8::internal::RecordReplayObjectId(isolate, value, allow_create);
+}
+
+// |handler| answers |name| from now on, with JSON made by malloc.
+extern "C" V8_EXPORT void V8RecordReplayRegisterEmbedderCommand(
+    const char* name, char* (*handler)(const char* params)) {
+  using v8::internal::gEmbedderCommands;
+  if (!gEmbedderCommands) {
+    gEmbedderCommands =
+        new std::map<std::string, char* (*)(const char* params)>();
+  }
+  (*gEmbedderCommands)[name] = handler;
+}
+
+namespace v8 {
+namespace internal {
+
+bool RecordReplayEmbedderCommand(const char* command, const char* params,
+                                 std::string* result) {
+  if (!gEmbedderCommands) return false;
+  auto it = gEmbedderCommands->find(command);
+  if (it == gEmbedderCommands->end()) return false;
+  char* answer = it->second(params);
+  *result = answer ? answer : "{}";
+  free(answer);
+  return true;
+}
+
+}  // namespace internal
+}  // namespace v8
+
+// The embedder's natives for the glue, set before the first command: on the
+// object the glue script is given, functions for what only the embedder knows.
+extern "C" V8_EXPORT void V8RecordReplaySetGlueNativesInstaller(
+    void (*installer)(v8::Isolate* isolate, v8::Local<v8::Context> context,
+                      v8::Local<v8::Object> rr)) {
+  v8::internal::RecordReplaySetGlueNativesInstaller(installer);
+}
+
+// The inspector session a replay's commands go through in this isolate.
+extern "C" V8_EXPORT v8_inspector::V8InspectorSession*
+V8RecordReplayGlueSession(v8::Isolate* isolate) {
+  return v8::internal::RecordReplayGlueSession(isolate);
+}
+
+extern "C" V8_EXPORT void V8RecordReplaySetNewScriptCallback(
+    void (*callback)(v8::Isolate* isolate, int script_id, const char* url,
+                     const char* source_map_url)) {
+  v8::internal::RecordReplaySetNewScriptCallback(callback);
+}
+
+// The text of one of the program's scripts, by its ID. The caller frees it.
+extern "C" V8_EXPORT char* V8RecordReplayScriptSource(int script_id) {
+  std::string source;
+  if (!v8::internal::RecordReplayScriptSource(script_id, &source)) {
+    return nullptr;
+  }
+  return strdup(source.c_str());
 }

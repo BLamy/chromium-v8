@@ -44,6 +44,10 @@ V8_EXPORT_PRIVATE void RecordReplayBytes(const char* why, void* buf,
 V8_EXPORT_PRIVATE void Print(const char* format, ...);
 V8_EXPORT_PRIVATE void Diagnostic(const char* format, ...);
 
+// Marks this point of the recording with something of |kind|. The point has to
+// be the same on both sides; |contents| is only looked at when replaying.
+V8_EXPORT_PRIVATE void OnAnnotation(const char* kind, const char* contents);
+
 // The exception that's unwinding, while the driver is told about it.
 V8_EXPORT_PRIVATE bool GetCurrentException(v8::Local<v8::Value>* exception);
 

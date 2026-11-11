@@ -40,6 +40,7 @@ bool (*gIsReplaying)();
 bool (*gHasDivergedFromRecording)();
 const char* (*gReplaceSourceContents)(const char* contents);
 size_t (*gNewBookmark)();
+void (*gOnAnnotation)(const char* kind, const char* contents);
 
 pthread_t gMainThread;
 
@@ -122,6 +123,7 @@ void SetRecordingOrReplaying(void* handle) {
       dlsym(handle, "RecordReplayReplaceSourceContents"));
 
   LoadSymbol(handle, "RecordReplayNewBookmark", gNewBookmark);
+  LoadSymbol(handle, "RecordReplayOnAnnotation", gOnAnnotation);
 
   gMainThread = pthread_self();
   recordreplay::gIsRecordingOrReplaying = true;
@@ -222,6 +224,11 @@ void RecordReplayBytes(const char* why, void* buf, size_t size) {
   if (IsRecordingOrReplaying()) gBytes(why, buf, size);
 }
 
+void OnAnnotation(const char* kind, const char* contents) {
+  if (!IsRecordingOrReplaying()) return;
+  gOnAnnotation(kind, contents);
+}
+
 void Print(const char* format, ...) {
   if (!IsRecordingOrReplaying()) return;
   va_list args;
@@ -245,6 +252,9 @@ void MaybeAttach() {
   // and refuses to be loaded again. When replaying, dlsym is the engine's, which
   // answers for itself. In a process that's doing neither, this finds nothing.
   if (!dlsym(RTLD_DEFAULT, "RecordReplayAttach")) return;
+  // Read before anything is recorded, where it's the real environment.
+  internal::gWarnMissingDependencyExecution =
+      !!getenv("RECORD_REPLAY_WARN_MISSING_EXECUTION");
   SetRecordingOrReplaying(RTLD_DEFAULT);
 }
 
