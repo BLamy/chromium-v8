@@ -303,6 +303,54 @@ std::string CommandGetSourceContents(const char* params) {
          "\",\"contentType\":\"text/javascript\"}";
 }
 
+// A relative URL against the URL of what refers to it, for the cases a source
+// map's URL comes in: absolute, from the root, or beside the script.
+std::string ResolveUrl(const std::string& base, const std::string& relative) {
+  if (relative.find("://") != std::string::npos ||
+      relative.compare(0, 5, "data:") == 0 ||
+      relative.compare(0, 5, "blob:") == 0) {
+    return relative;
+  }
+  size_t scheme = base.find("://");
+  if (scheme == std::string::npos) return relative;
+  size_t path = base.find('/', scheme + 3);
+  std::string origin = path == std::string::npos ? base : base.substr(0, path);
+  if (relative.compare(0, 2, "//") == 0) {
+    return base.substr(0, scheme + 1) + relative;
+  }
+  if (!relative.empty() && relative[0] == '/') return origin + relative;
+  std::string directory = path == std::string::npos ? base + "/" : base;
+  size_t query = directory.find_first_of("?#");
+  if (query != std::string::npos) directory.resize(query);
+  directory.resize(directory.rfind('/') + 1);
+  return directory + relative;
+}
+
+// Where a script's source map is, from the sourceMappingURL it ends with, and
+// what the paths inside that map are relative to. As upstream's
+// Target.getSourceMapURL, which Replay's backend finds a script's map by.
+std::string CommandGetSourceMapURL(const char* params) {
+  const RegisteredScript* entry = FindScript(params);
+  if (!entry) return "{}";
+  ScriptScope scope(*entry);
+  DirectHandle<Script> script = entry->script;
+  if (!IsString(script->source_mapping_url())) return "{}";
+  std::string relative =
+      Cast<String>(script->source_mapping_url())->ToCString().get();
+  if (relative.empty()) return "{}";
+  std::string script_url;
+  if (IsString(script->name())) {
+    script_url = Cast<String>(script->name())->ToCString().get();
+  }
+  std::string url = ResolveUrl(script_url, relative);
+  bool is_data = url.compare(0, 5, "data:") == 0;
+  std::string base = is_data ? script_url : url;
+  // A map inside a data: URL is its own contents, and isn't fetched.
+  if (is_data) return "{}";
+  return "{\"url\":\"" + JsonEscape(url.c_str()) + "\",\"baseUrl\":\"" +
+         JsonEscape(base.c_str()) + "\"}";
+}
+
 std::string CommandGetPossibleBreakpoints(const char* params) {
   const RegisteredScript* entry = FindScript(params);
   if (!entry) return "{\"lineLocations\":[]}";
@@ -550,6 +598,8 @@ char* CommandCallback(const char* command, const char* params) {
   std::string result;
   if (!strcmp(command, "Debugger.getSourceContents")) {
     result = CommandGetSourceContents(params);
+  } else if (!strcmp(command, "Target.getSourceMapURL")) {
+    result = CommandGetSourceMapURL(params);
   } else if (!strcmp(command, "Debugger.getPossibleBreakpoints")) {
     result = CommandGetPossibleBreakpoints(params);
   } else if (!strcmp(command, "Target.convertLocationToFunctionOffset")) {
