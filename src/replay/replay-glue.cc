@@ -415,3 +415,33 @@ extern "C" V8_EXPORT const char* V8RecordReplayPendingPrivilegedEvaluation(
 extern "C" V8_EXPORT uint64_t V8RecordReplayProgressCounter() {
   return v8::internal::gProgressCounter ? *v8::internal::gProgressCounter : 0;
 }
+
+// A stretch of the replay's own code, run from inside the program's: a hook
+// it put into a script it replaced. Nothing in it is in the recording, and it
+// can call the program's functions, so the count of progress is put back
+// when it ends, as it is after a command.
+namespace {
+std::vector<uint64_t>* gReplayCodeProgress = nullptr;
+}  // namespace
+
+extern "C" V8_EXPORT void V8RecordReplayBeginReplayCode(const char* label) {
+  if (!v8::recordreplay::IsRecordingOrReplaying()) return;
+  if (!gReplayCodeProgress) gReplayCodeProgress = new std::vector<uint64_t>();
+  v8::recordreplay::BeginDisallowEvents(label);
+  gReplayCodeProgress->push_back(
+      v8::internal::gProgressCounter ? *v8::internal::gProgressCounter : 0);
+}
+
+extern "C" V8_EXPORT void V8RecordReplayEndReplayCode() {
+  if (!v8::recordreplay::IsRecordingOrReplaying() || !gReplayCodeProgress ||
+      gReplayCodeProgress->empty()) {
+    return;
+  }
+  uint64_t progress = gReplayCodeProgress->back();
+  gReplayCodeProgress->pop_back();
+  if (v8::internal::gProgressCounter &&
+      !v8::recordreplay::HasDivergedFromRecording()) {
+    *v8::internal::gProgressCounter = progress;
+  }
+  v8::recordreplay::EndDisallowEvents();
+}
