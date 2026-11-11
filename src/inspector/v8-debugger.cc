@@ -1529,6 +1529,23 @@ void V8Debugger::setMaxAsyncTaskStacksForTest(int limit) {
 internal::V8DebuggerId V8Debugger::debuggerIdFor(int contextGroupId) {
   auto it = m_contextGroupIdToDebuggerId.find(contextGroupId);
   if (it != m_contextGroupIdToDebuggerId.end()) return it->second;
+  // An ID is random bytes, read the first time one's asked for. A replay's own
+  // commands can ask before the program does, with events disallowed, and an
+  // ID kept from then would leave the program's first ask with nothing to
+  // read, where the recording has the read. So what's made with events
+  // disallowed is kept apart, and only used until the program has its own.
+  if (v8::recordreplay::IsRecordingOrReplaying() &&
+      v8::recordreplay::AreEventsDisallowed()) {
+    auto apart = m_contextGroupIdToReplayDebuggerId.find(contextGroupId);
+    if (apart != m_contextGroupIdToReplayDebuggerId.end()) {
+      return apart->second;
+    }
+    internal::V8DebuggerId replayId =
+        internal::V8DebuggerId::generate(m_inspector);
+    m_contextGroupIdToReplayDebuggerId.insert(
+        apart, std::make_pair(contextGroupId, replayId));
+    return replayId;
+  }
   internal::V8DebuggerId debuggerId =
       internal::V8DebuggerId::generate(m_inspector);
   m_contextGroupIdToDebuggerId.insert(
