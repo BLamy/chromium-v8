@@ -3345,6 +3345,12 @@ int Message::ErrorLevel() const {
   return self->error_level();
 }
 
+// The bookmark for where a message was made, or 0. See JSMessageObject.
+extern "C" V8_EXPORT int V8GetMessageRecordReplayBookmark(
+    v8::Local<v8::Message> message) {
+  return Utils::OpenDirectHandle(*message)->record_replay_bookmark();
+}
+
 int Message::GetStartColumn() const {
   auto self = Utils::OpenDirectHandle(this);
   i::Isolate* i_isolate = i::Isolate::Current();

@@ -3874,7 +3874,8 @@ void SetRecordReplayFlags(UnoptimizedCompileFlags& flags,
                           NativesFlag natives) {
   if (!recordreplay::IsRecordingOrReplaying()) return;
   if (natives != NOT_NATIVES_CODE || !recordreplay::IsMainThread() ||
-      recordreplay::AreEventsDisallowed() || RecordReplayIsDebuggerCompile()) {
+      recordreplay::AreEventsDisallowed() ||
+      recordreplay::IsInReplayCode() || RecordReplayIsDebuggerCompile()) {
     flags.set_record_replay_ignore(true);
     return;
   }

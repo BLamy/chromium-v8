@@ -649,8 +649,8 @@ char* CommandCallback(const char* command, const char* params) {
   } else if (!strcmp(command, "Target.getFunctionsInRange")) {
     result = CommandGetFunctionsInRange(params);
   } else if (!strcmp(command, "Target.currentGeneratorId")) {
-    // Nothing here needs generators tied together across their resumes.
-    result = "{}";
+    int id = RecordReplayCurrentGeneratorId();
+    result = id ? "{\"id\":" + std::to_string(id) + "}" : "{}";
   } else if (!strcmp(command, "Target.getStackFunctionIDs")) {
     result = CommandGetStackFunctionIds();
   } else if (RecordReplayEmbedderCommand(command, params, &result)) {

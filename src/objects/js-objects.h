@@ -1513,6 +1513,11 @@ V8_OBJECT class JSMessageObject : public JSObject {
   inline int error_level() const;
   inline void set_error_level(int value);
 
+  // When recording or replaying, a bookmark for where the message was made,
+  // which for an error is where it was thrown. 0 when there isn't one.
+  inline int record_replay_bookmark() const;
+  inline void set_record_replay_bookmark(int value);
+
   // Dispatched behavior.
   DECL_PRINTER(JSMessageObject)
   DECL_VERIFIER(JSMessageObject)
@@ -1559,6 +1564,7 @@ V8_OBJECT class JSMessageObject : public JSObject {
   TaggedMember<Smi> start_position_;
   TaggedMember<Smi> end_position_;
   TaggedMember<Smi> error_level_;
+  TaggedMember<Smi> record_replay_bookmark_;
 } V8_OBJECT_END;
 
 // The [Async-from-Sync Iterator] object

@@ -88,6 +88,7 @@
 #include "src/objects/string-forwarding-table-inl.h"
 #include "src/objects/transitions-inl.h"
 #include "src/objects/visitors.h"
+#include "src/replay/replay.h"
 #include "src/sandbox/trusted-pointer-table.h"
 #include "src/sandbox/trusted-pointer-tag.h"
 #include "src/snapshot/shared-heap-serializer.h"
@@ -2357,6 +2358,10 @@ std::pair<size_t, size_t> MarkCompactCollector::ProcessMarkingWorklist(
     }
     bytes_processed += visited_size;
     objects_processed++;
+    // Marking a large heap opens no further GC scopes.
+    if (V8_UNLIKELY(objects_processed % 0x10000 == 0)) {
+      recordreplay::NotifyActivity();
+    }
     static_assert(base::bits::IsPowerOfTwo(kDeadlineCheckInterval),
                   "kDeadlineCheckInterval must be power of 2");
     // The below check is an optimized version of

@@ -2911,6 +2911,9 @@ Tagged<Object> Isolate::UnwindAndFindHandler() {
     thread_local_top()->num_frames_above_pending_handler_ =
         num_frames_above_handler;
 
+    RecordReplaySyncJsFrameDepth(this,
+                                 static_cast<int>(num_frames_above_handler));
+
 #if V8_ENABLE_WEBASSEMBLY
     // If the exception was caught in a different stack, process all
     // intermediate stack switches.

@@ -17,6 +17,8 @@
 namespace v8 {
 namespace internal {
 
+class AstRawString;
+
 class Isolate;
 class JSFunction;
 class JSPromise;
@@ -57,6 +59,31 @@ std::string GetRecordReplayFunctionId(Tagged<SharedFunctionInfo> shared);
 void ParseRecordReplayFunctionId(const std::string& function_id, int* script_id,
                                  int* source_position);
 V8_EXPORT_PRIVATE void RecordReplayOnExceptionUnwind(Isolate* isolate);
+// A bookmark for here, where a message is being made: for an uncaught error,
+// that's where it's thrown, which is where the driver says the message is.
+// 0 when there's none to have.
+V8_EXPORT_PRIVATE int RecordReplayNewMessageBookmark(Isolate* isolate);
+
+// An ID for an object, the same for as long as the object lives and, for one
+// that's given it where it's made, the same in every replay.
+int RecordReplayObjectId(v8::Isolate* isolate, v8::Local<v8::Value> value,
+                         bool allow_create);
+// Whether an object that has this property assigned, as |this| or in a
+// literal, gets its ID there. A replay does that for what might be a React
+// fiber, which has an "alternate", and for everything when the driver asks.
+bool RecordReplayTrackThisObjectAssignment(const AstRawString* property);
+void RecordReplayTrackObjectsCallback(bool track_objects);
+// How many instrumented JS frames are on the main thread's stack. A recording
+// and its replays use different amounts of native stack for the same JS, so
+// the stack overflows at a depth instead: kRecordReplayMaxJsFrameDepth.
+extern int gRecordReplayJsFrameDepth;
+constexpr int kRecordReplayMaxJsFrameDepth = 1024;
+// Counts the frames again where an exception is caught, as the frames it
+// unwound through never said they'd gone.
+void RecordReplaySyncJsFrameDepth(Isolate* isolate, int frames_above_handler);
+
+// The ID of the generator whose frame is being announced, or 0.
+int RecordReplayCurrentGeneratorId();
 
 // Promises are part of the dependency graph a replay builds, which takes a
 // promise hook. The hook is there while recording too, so that promises take

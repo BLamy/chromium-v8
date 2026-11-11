@@ -27,6 +27,16 @@ inline bool IsRecordingOrReplaying() { return gIsRecordingOrReplaying; }
 V8_EXPORT_PRIVATE bool IsRecording();
 V8_EXPORT_PRIVATE bool IsReplaying();
 
+// Tells the driver the process is busy where nothing else would: a replay
+// that goes long without progress is taken for one that's hung.
+V8_EXPORT_PRIVATE void NotifyActivity();
+
+// Whether Replay's own scripts are what's running, on the main thread. What
+// they compile isn't instrumented, as it isn't the program's.
+V8_EXPORT_PRIVATE void EnterReplayCode();
+V8_EXPORT_PRIVATE void ExitReplayCode();
+V8_EXPORT_PRIVATE bool IsInReplayCode();
+
 // The thread V8 was initialized on, which is the only one recorded in detail.
 V8_EXPORT_PRIVATE bool IsMainThread();
 
@@ -55,6 +65,8 @@ V8_EXPORT_PRIVATE bool IsReplayOwnedInspectorSession(const void* session);
 
 // The exception that's unwinding, while the driver is told about it.
 V8_EXPORT_PRIVATE bool GetCurrentException(v8::Local<v8::Value>* exception);
+// What the top frame is returning, while the driver is told it's returning.
+V8_EXPORT_PRIVATE bool GetCurrentReturnValue(v8::Local<v8::Value>* value);
 
 // Attaches to the driver if the process was started to record or replay, which
 // has to happen before V8's flags are frozen.

@@ -16484,6 +16484,12 @@ ReduceResult MaglevGraphBuilder::VisitDebugger() {
 // Only the interpreter runs when recording or replaying.
 ReduceResult MaglevGraphBuilder::VisitRecordReplayIncExecutionProgressCounter() { UNREACHABLE(); }
 ReduceResult MaglevGraphBuilder::VisitRecordReplayInstrumentation() { UNREACHABLE(); }
+ReduceResult MaglevGraphBuilder::VisitRecordReplayNotifyActivity() { UNREACHABLE(); }
+ReduceResult MaglevGraphBuilder::VisitReplayIncJsFrameDepth() { UNREACHABLE(); }
+ReduceResult MaglevGraphBuilder::VisitReplayDecJsFrameDepth() { UNREACHABLE(); }
+ReduceResult MaglevGraphBuilder::VisitRecordReplayInstrumentationGenerator() { UNREACHABLE(); }
+ReduceResult MaglevGraphBuilder::VisitRecordReplayInstrumentationReturn() { UNREACHABLE(); }
+ReduceResult MaglevGraphBuilder::VisitRecordReplayTrackObjectId() { UNREACHABLE(); }
 
 ReduceResult MaglevGraphBuilder::VisitIncBlockCounter() {
   ValueNode* closure = GetClosure();

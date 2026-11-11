@@ -226,6 +226,19 @@ void NativeCurrentConsoleCall(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
 // The inspector's description of any value, as JSON, for the glue to give an
 // ID to. The embedder hands the glue page objects this way.
+// What the top frame is returning, when the replay is stopped where it returns.
+void NativeHasReturnValue(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> value;
+  info.GetReturnValue().Set(v8::recordreplay::GetCurrentReturnValue(&value));
+}
+
+void NativeReturnValue(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Local<v8::Value> value;
+  if (v8::recordreplay::GetCurrentReturnValue(&value)) {
+    info.GetReturnValue().Set(value);
+  }
+}
+
 void NativeWrapValue(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::Isolate* isolate = info.GetIsolate();
   IsolateGlue* glue = (*gGlue)[isolate];
@@ -322,6 +335,8 @@ IsolateGlue* EnsureGlue(v8::Isolate* isolate) {
   AddNative(isolate, context, rr, "currentPageError", NativeCurrentPageError);
   AddNative(isolate, context, rr, "currentConsoleCall", NativeCurrentConsoleCall);
   AddNative(isolate, context, rr, "wrapValue", NativeWrapValue);
+  AddNative(isolate, context, rr, "hasReturnValue", NativeHasReturnValue);
+  AddNative(isolate, context, rr, "returnValue", NativeReturnValue);
   AddNative(isolate, context, rr, "unwrapObject", NativeUnwrapObject);
   if (gGlueNativesInstaller) gGlueNativesInstaller(isolate, context, rr);
 
@@ -522,12 +537,21 @@ extern "C" V8_EXPORT void V8RecordReplayEndReplayCode() {
   v8::recordreplay::EndDisallowEvents();
 }
 
+extern "C" V8_EXPORT void V8RecordReplayEnterReplayCode() {
+  v8::recordreplay::EnterReplayCode();
+}
+
+extern "C" V8_EXPORT void V8RecordReplayExitReplayCode() {
+  v8::recordreplay::ExitReplayCode();
+}
+
 // An uncaught error, which the embedder knows about and V8's console doesn't.
 // The driver reads what it says, with a command, before this returns.
 extern "C" V8_EXPORT void V8RecordReplayOnPageError(const char* message,
                                                     const char* url,
                                                     int line, int column,
-                                                    int script_id) {
+                                                    int script_id,
+                                                    int bookmark) {
   if (!v8::recordreplay::IsRecordingOrReplaying() ||
       !v8::recordreplay::IsMainThread() ||
       v8::recordreplay::AreEventsDisallowed()) {
@@ -555,9 +579,11 @@ extern "C" V8_EXPORT void V8RecordReplayOnPageError(const char* message,
                      ",\"column\":" + std::to_string(column) +
                      ",\"scriptId\":" + std::to_string(script_id) + "}";
   v8::internal::RecordReplaySetCurrentPageError(json.c_str());
-  // No JS is running by now, so where this is has to be marked.
+  // No JS is running by now, so the message is where it was thrown, which
+  // has a bookmark when V8 made the message for an exception.
   v8::internal::RecordReplayOnConsoleMessage(
-      v8::internal::RecordReplayNewBookmark());
+      bookmark > 0 ? static_cast<size_t>(bookmark)
+                   : v8::internal::RecordReplayNewBookmark());
   v8::internal::RecordReplaySetCurrentPageError(nullptr);
 }
 

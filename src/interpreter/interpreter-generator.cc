@@ -29,6 +29,7 @@
 #include "src/objects/oddball.h"
 #include "src/objects/shared-function-info.h"
 #include "src/objects/source-text-module.h"
+#include "src/replay/replay-internal.h"
 #include "src/utils/ostreams.h"
 #include "torque-generated/exported-macros-assembler.h"
 
@@ -3297,6 +3298,53 @@ IGNITION_HANDLER(RecordReplayIncExecutionProgressCounter, InterpreterAssembler) 
   Dispatch();
 }
 
+// ReplayIncJsFrameDepth
+//
+// A JS frame is on the stack that wasn't. Past a fixed depth that's a stack
+// overflow, at the same frame in a recording and every replay of it.
+IGNITION_HANDLER(ReplayIncJsFrameDepth, InterpreterAssembler) {
+  TNode<ExternalReference> depth_addr = ExternalConstant(
+      ExternalReference::address_of_record_replay_js_frame_depth());
+  TNode<Int32T> depth = Load<Int32T>(depth_addr);
+  TNode<Int32T> new_depth = Int32Add(depth, Int32Constant(1));
+  StoreNoWriteBarrier(MachineRepresentation::kWord32, depth_addr, new_depth);
+
+  Label ok(this), overflow(this, Label::kDeferred);
+  GotoIf(Int32GreaterThanOrEqual(new_depth,
+                                 Int32Constant(kRecordReplayMaxJsFrameDepth)),
+         &overflow);
+  Goto(&ok);
+
+  BIND(&overflow);
+  CallRuntime(Runtime::kThrowStackOverflow, GetContext());
+  Abort(AbortReason::kUnexpectedReturnFromThrow);
+  Unreachable();
+
+  BIND(&ok);
+  Dispatch();
+}
+
+// ReplayDecJsFrameDepth
+//
+// A JS frame is leaving the stack.
+IGNITION_HANDLER(ReplayDecJsFrameDepth, InterpreterAssembler) {
+  TNode<ExternalReference> depth_addr = ExternalConstant(
+      ExternalReference::address_of_record_replay_js_frame_depth());
+  TNode<Int32T> depth = Load<Int32T>(depth_addr);
+  TNode<Int32T> new_depth = Int32Sub(depth, Int32Constant(1));
+  StoreNoWriteBarrier(MachineRepresentation::kWord32, depth_addr, new_depth);
+  Dispatch();
+}
+
+// RecordReplayNotifyActivity
+//
+// Where the progress counter would advance in code that has no counter, so
+// that a replay running it isn't taken for one that's hung.
+IGNITION_HANDLER(RecordReplayNotifyActivity, InterpreterAssembler) {
+  CallRuntime(Runtime::kRecordReplayNotifyActivity, GetContext());
+  Dispatch();
+}
+
 // RecordReplayInstrumentation <site>
 //
 // A point the replay engine can look for or stop at.
@@ -3305,6 +3353,41 @@ IGNITION_HANDLER(RecordReplayInstrumentation, InterpreterAssembler) {
   TNode<Smi> site = BytecodeOperandUImmSmi(0);
   CallRuntime(Runtime::kRecordReplayInstrumentation, GetContext(), closure,
               site);
+  Dispatch();
+}
+
+// RecordReplayInstrumentationGenerator <site> <generator>
+//
+// The point where a resumable function's frame starts or resumes, with its
+// generator object, whose ID ties the frame's parts together.
+IGNITION_HANDLER(RecordReplayInstrumentationGenerator, InterpreterAssembler) {
+  TNode<JSFunction> closure = LoadFunctionClosure();
+  TNode<Smi> site = BytecodeOperandUImmSmi(0);
+  TNode<Object> generator = LoadRegisterAtOperandIndex(1);
+  CallRuntime(Runtime::kRecordReplayInstrumentationGenerator, GetContext(),
+              closure, site, generator);
+  Dispatch();
+}
+
+// RecordReplayInstrumentationReturn <site> <value>
+//
+// The point where a frame returns, with what it returns.
+IGNITION_HANDLER(RecordReplayInstrumentationReturn, InterpreterAssembler) {
+  TNode<JSFunction> closure = LoadFunctionClosure();
+  TNode<Smi> site = BytecodeOperandUImmSmi(0);
+  TNode<Object> return_value = LoadRegisterAtOperandIndex(1);
+  CallRuntime(Runtime::kRecordReplayInstrumentationReturn, GetContext(),
+              closure, site, return_value);
+  Dispatch();
+}
+
+// RecordReplayTrackObjectId <object>
+//
+// Gives an object its persistent ID where it's made, which is the same place
+// in every replay.
+IGNITION_HANDLER(RecordReplayTrackObjectId, InterpreterAssembler) {
+  TNode<Object> object = LoadRegisterAtOperandIndex(0);
+  CallRuntime(Runtime::kRecordReplayTrackObjectId, GetContext(), object);
   Dispatch();
 }
 

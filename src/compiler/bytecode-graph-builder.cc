@@ -3944,6 +3944,12 @@ DEBUG_BREAK_BYTECODE_LIST(DEBUG_BREAK)
 // Only the interpreter runs when recording or replaying.
 void BytecodeGraphBuilder::VisitRecordReplayIncExecutionProgressCounter() { UNREACHABLE(); }
 void BytecodeGraphBuilder::VisitRecordReplayInstrumentation() { UNREACHABLE(); }
+void BytecodeGraphBuilder::VisitRecordReplayNotifyActivity() { UNREACHABLE(); }
+void BytecodeGraphBuilder::VisitReplayIncJsFrameDepth() { UNREACHABLE(); }
+void BytecodeGraphBuilder::VisitReplayDecJsFrameDepth() { UNREACHABLE(); }
+void BytecodeGraphBuilder::VisitRecordReplayInstrumentationGenerator() { UNREACHABLE(); }
+void BytecodeGraphBuilder::VisitRecordReplayInstrumentationReturn() { UNREACHABLE(); }
+void BytecodeGraphBuilder::VisitRecordReplayTrackObjectId() { UNREACHABLE(); }
 
 void BytecodeGraphBuilder::VisitIncBlockCounter() {
   Node* closure = GetFunctionClosure();

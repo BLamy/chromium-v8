@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "src/api/api-inl.h"
+#include "src/ast/ast-value-factory.h"
 #include "src/execution/arguments-inl.h"
+#include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
 #include "src/objects/shared-function-info-inl.h"
 #include "src/replay/replay-internal.h"
@@ -143,10 +145,118 @@ void RecordReplayOnExceptionUnwind(Isolate* isolate) {
   gLastExceptionUnwindProgress = *gProgressCounter;
 }
 
+int RecordReplayNewMessageBookmark(Isolate* isolate) {
+  if (!recordreplay::IsRecordingOrReplaying() ||
+      !recordreplay::IsMainThread() || recordreplay::AreEventsDisallowed() ||
+      recordreplay::HasDivergedFromRecording()) {
+    return 0;
+  }
+  // The driver can run commands at a bookmark, which need a clean slate, as
+  // they do when an exception unwinds.
+  HandleScope scope(isolate);
+  DirectHandle<Object> exception;
+  const bool had_exception = isolate->has_exception();
+  if (had_exception) {
+    exception = direct_handle(isolate->exception(), isolate);
+    isolate->clear_internal_exception();
+    gCurrentException = &exception;
+  }
+  DirectHandle<Object> message(isolate->pending_message(), isolate);
+  isolate->clear_pending_message();
+  const size_t bookmark = RecordReplayNewBookmark();
+  if (had_exception) {
+    gCurrentException = nullptr;
+    CHECK(!isolate->has_exception());
+    isolate->set_exception(*exception);
+  }
+  isolate->set_pending_message(*message);
+  return Smi::IsValid(static_cast<intptr_t>(bookmark))
+             ? static_cast<int>(bookmark)
+             : 0;
+}
+
 RUNTIME_FUNCTION(Runtime_RecordReplayIncExecutionProgressCounter) {
   SealHandleScope shs(isolate);
   DCHECK_EQ(0, args.length());
   OnExecutionProgress();
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+int gRecordReplayJsFrameDepth;
+
+void RecordReplaySyncJsFrameDepth(Isolate* isolate, int frames_above_handler) {
+  if (!recordreplay::IsRecordingOrReplaying() ||
+      !recordreplay::IsMainThread()) {
+    return;
+  }
+  int depth = 0;
+  int index = 0;
+  for (StackFrameIterator it(isolate); !it.done(); it.Advance(), index++) {
+    if (index < frames_above_handler) continue;
+    if (it.frame()->is_javascript()) depth++;
+  }
+  gRecordReplayJsFrameDepth = depth;
+}
+
+RUNTIME_FUNCTION(Runtime_RecordReplayNotifyActivity) {
+  SealHandleScope shs(isolate);
+  DCHECK_EQ(0, args.length());
+  recordreplay::NotifyActivity();
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+namespace {
+bool gTrackObjects;
+int gCurrentGeneratorId;
+Handle<Object>* gCurrentReturnValue;
+}  // namespace
+
+RUNTIME_FUNCTION(Runtime_RecordReplayInstrumentationReturn) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(3, args.length());
+  Handle<Object> return_value = args.at(2);
+  Handle<Object>* previous = gCurrentReturnValue;
+  if (recordreplay::IsMainThread()) gCurrentReturnValue = &return_value;
+  OnInstrumentation(Cast<JSFunction>(args[0]), args.smi_value_at(1));
+  if (recordreplay::IsMainThread()) gCurrentReturnValue = previous;
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+void RecordReplayTrackObjectsCallback(bool track_objects) {
+  CHECK(recordreplay::IsReplaying());
+  gTrackObjects = track_objects;
+}
+
+bool RecordReplayTrackThisObjectAssignment(const AstRawString* property) {
+  if (gTrackObjects) return true;
+  return recordreplay::IsReplaying() && property->IsOneByteEqualTo("alternate");
+}
+
+int RecordReplayCurrentGeneratorId() { return gCurrentGeneratorId; }
+
+RUNTIME_FUNCTION(Runtime_RecordReplayInstrumentationGenerator) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(3, args.length());
+  // The ID is made in the same place in every replay, whether or not the
+  // engine is listening, so that it's the same in each.
+  CHECK(!gCurrentGeneratorId);
+  if (recordreplay::IsReplaying() && recordreplay::IsMainThread()) {
+    gCurrentGeneratorId = RecordReplayObjectId(
+        reinterpret_cast<v8::Isolate*>(isolate), Utils::ToLocal(args.at(2)),
+        /* allow_create */ true);
+  }
+  OnInstrumentation(Cast<JSFunction>(args[0]), args.smi_value_at(1));
+  gCurrentGeneratorId = 0;
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_RecordReplayTrackObjectId) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  if (recordreplay::IsReplaying() && recordreplay::IsMainThread()) {
+    RecordReplayObjectId(reinterpret_cast<v8::Isolate*>(isolate),
+                         Utils::ToLocal(args.at(0)), /* allow_create */ true);
+  }
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
@@ -158,6 +268,12 @@ RUNTIME_FUNCTION(Runtime_RecordReplayInstrumentation) {
 }
 
 }  // namespace internal
+
+bool recordreplay::GetCurrentReturnValue(v8::Local<v8::Value>* value) {
+  if (!internal::gCurrentReturnValue) return false;
+  *value = Utils::ToLocal(*internal::gCurrentReturnValue);
+  return true;
+}
 
 bool recordreplay::GetCurrentException(v8::Local<v8::Value>* exception) {
   if (!internal::gCurrentException) return false;

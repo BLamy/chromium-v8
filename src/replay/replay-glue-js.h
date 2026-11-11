@@ -550,9 +550,18 @@ function createProtocolLocation(location) {
   }];
 }
 
-function createProtocolFrame(frameId, frame) {
+function createProtocolFrame(frameId, frame, topmost) {
   // CDP call frames don't provide detailed type information.
   const type = frame.functionName ? "call" : "global";
+
+  // Stopped where the top frame returns, there's what it returns.
+  let returnValue;
+  if (topmost && rr.hasReturnValue()) {
+    const text = rr.wrapValue(rr.returnValue());
+    if (text) {
+      returnValue = remoteObjectToProtocolValue(JSON.parse(text));
+    }
+  }
 
   return {
     frameId,
@@ -562,6 +571,7 @@ function createProtocolFrame(frameId, frame) {
     location: createProtocolLocation(frame.location),
     scopeChain: frame.scopeChain.map(scopeToProtocolId),
     this: remoteObjectToProtocolValue(frame.this),
+    returnValue,
   };
 }
 
@@ -734,7 +744,7 @@ function Pause_evaluateInGlobal({ expression }) {
 
 function Pause_getAllFrames() {
   const frames = getStackFrames().map((frame, index) =>
-    createProtocolFrame(String(index), frame)
+    createProtocolFrame(String(index), frame, index == 0)
   );
   return { frames: frames.map(f => f.frameId), data: { frames } };
 }

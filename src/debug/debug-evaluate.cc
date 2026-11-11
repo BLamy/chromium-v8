@@ -561,7 +561,13 @@ bool BytecodeHasNoSideEffect(interpreter::Bytecode bytecode) {
     // Misc.
     case Bytecode::kIncBlockCounter:  // Coverage counters.
     case Bytecode::kRecordReplayIncExecutionProgressCounter:
+    case Bytecode::kRecordReplayNotifyActivity:
+    case Bytecode::kReplayIncJsFrameDepth:
+    case Bytecode::kReplayDecJsFrameDepth:
     case Bytecode::kRecordReplayInstrumentation:
+    case Bytecode::kRecordReplayInstrumentationGenerator:
+    case Bytecode::kRecordReplayInstrumentationReturn:
+    case Bytecode::kRecordReplayTrackObjectId:
     case Bytecode::kForInEnumerate:
     case Bytecode::kForInPrepare:
     case Bytecode::kForInNext:

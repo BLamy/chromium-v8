@@ -12,6 +12,7 @@
 #include "src/base/platform/platform.h"
 #include "src/execution/isolate.h"
 #include "src/heap/heap-inl.h"
+#include "src/replay/replay.h"
 
 namespace v8 {
 namespace internal {
@@ -40,6 +41,14 @@ GCTracer::Scope::Scope(GCTracer* tracer, ScopeId scope, ThreadKind thread_kind)
       start_time_(base::TimeTicks::Now()) {
   DCHECK_IMPLIES(thread_kind_ == ThreadKind::kMain,
                  LocalHeap::Current()->is_main_thread());
+
+  // A replay's GCs are atomic and advance nothing that hang detection counts
+  // as progress. Scopes opened outside a GC, as sweeping on allocation is,
+  // don't count as activity.
+  if (thread_kind == ThreadKind::kMain &&
+      tracer_->heap_->gc_state() != Heap::NOT_IN_GC) {
+    recordreplay::NotifyActivity();
+  }
 
 #ifdef V8_RUNTIME_CALL_STATS
   if (V8_LIKELY(!TracingFlags::is_runtime_stats_enabled())) return;

@@ -183,6 +183,10 @@ constexpr bool CanTriggerGC(T... properties) {
   F(ProfileCreateSnapshotDataBlob, 0, 1)        \
   F(RecordReplayIncExecutionProgressCounter, 0, 1) \
   F(RecordReplayInstrumentation, 2, 1)          \
+  F(RecordReplayInstrumentationGenerator, 3, 1) \
+  F(RecordReplayInstrumentationReturn, 3, 1)    \
+  F(RecordReplayNotifyActivity, 0, 1)           \
+  F(RecordReplayTrackObjectId, 1, 1)            \
   F(ScheduleBreak, 0, 1)                        \
   F(ScriptLocationFromLine2, 4, 1)              \
   F(SetGeneratorScopeVariableValue, 4, 1)       \

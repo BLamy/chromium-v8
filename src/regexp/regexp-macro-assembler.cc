@@ -15,6 +15,7 @@
 #include "src/regexp/regexp-stack.h"
 #include "src/regexp/regexp.h"
 #include "src/regexp/special-case.h"
+#include "src/replay/replay.h"
 #include "src/sandbox/check.h"
 #include "src/strings/unicode-inl.h"
 
@@ -530,6 +531,10 @@ int NativeRegExpMacroAssembler::CheckStackGuardState(
   Address old_pc = PointerAuthentication::AuthenticatePC(return_address, 0);
   DCHECK_LE(re_code->instruction_start(), old_pc);
   DCHECK_LE(old_pc, re_code->code(kAcquireLoad)->instruction_end());
+
+  // A match can backtrack for a long time without advancing the progress
+  // counter, and comes here as it does.
+  recordreplay::NotifyActivity();
 
   StackLimitCheck check(isolate);
   bool js_has_overflowed = check.JsHasOverflowed(gap);

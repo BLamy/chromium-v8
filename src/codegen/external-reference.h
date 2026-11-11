@@ -96,6 +96,7 @@ enum class IsolateFieldId : uint8_t;
   V(address_of_mock_arraybuffer_allocator_flag,                                \
     "v8_flags.mock_arraybuffer_allocator")                                     \
   V(address_of_one_half, "LDoubleConstant::one_half")                          \
+  V(address_of_record_replay_js_frame_depth, "gRecordReplayJsFrameDepth")      \
   V(address_of_runtime_stats_flag, "TracingFlags::runtime_stats")              \
   V(address_of_the_hole_nan, "the_hole_nan")                                   \
   V(address_of_track_array_buffer_views_flag,                                  \

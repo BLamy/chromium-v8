@@ -522,6 +522,19 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   // so that bytecode and heap use are too, and do nothing until the engine asks.
   BytecodeArrayBuilder& RecordReplayInstrumentation(
       const char* kind, int source_position = kNoSourcePosition);
+  // A JS frame arriving on the stack, and leaving it.
+  BytecodeArrayBuilder& ReplayIncJsFrameDepth();
+  BytecodeArrayBuilder& ReplayDecJsFrameDepth();
+  // The same for a resumable function's frame, with its generator object.
+  BytecodeArrayBuilder& RecordReplayInstrumentationGenerator(
+      const char* kind, Register generator_object);
+  // The same for a frame that's returning, with what it returns.
+  BytecodeArrayBuilder& RecordReplayInstrumentationReturn(
+      const char* kind, Register return_value,
+      int source_position = kNoSourcePosition);
+  // Gives |object| its persistent ID here, where it's made.
+  BytecodeArrayBuilder& RecordReplayTrackObjectId(Register object);
+  bool RecordReplayEmitsOpcodes() const { return emit_record_replay_opcodes_; }
 
   // Registers a breakpoint site at |site_position| and queues its instrumentation
   // bytecode, which takes the pending source position the way

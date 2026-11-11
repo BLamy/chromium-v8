@@ -3064,6 +3064,12 @@ void BaselineCompiler::VisitDebugger() {
 // Only the interpreter runs when recording or replaying.
 void BaselineCompiler::VisitRecordReplayIncExecutionProgressCounter() { UNREACHABLE(); }
 void BaselineCompiler::VisitRecordReplayInstrumentation() { UNREACHABLE(); }
+void BaselineCompiler::VisitRecordReplayNotifyActivity() { UNREACHABLE(); }
+void BaselineCompiler::VisitReplayIncJsFrameDepth() { UNREACHABLE(); }
+void BaselineCompiler::VisitReplayDecJsFrameDepth() { UNREACHABLE(); }
+void BaselineCompiler::VisitRecordReplayInstrumentationGenerator() { UNREACHABLE(); }
+void BaselineCompiler::VisitRecordReplayInstrumentationReturn() { UNREACHABLE(); }
+void BaselineCompiler::VisitRecordReplayTrackObjectId() { UNREACHABLE(); }
 
 void BaselineCompiler::VisitIncBlockCounter() {
   SaveAccumulatorScope accumulator_scope(this, &basm_);

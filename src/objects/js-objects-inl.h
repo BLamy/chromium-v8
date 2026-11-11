@@ -862,6 +862,13 @@ void JSMessageObject::set_error_level(int value) {
   error_level_.store(this, Smi::FromInt(value));
 }
 
+int JSMessageObject::record_replay_bookmark() const {
+  return record_replay_bookmark_.load().value();
+}
+void JSMessageObject::set_record_replay_bookmark(int value) {
+  record_replay_bookmark_.store(this, Smi::FromInt(value));
+}
+
 int JSMessageObject::raw_type() const { return message_type_.load().value(); }
 void JSMessageObject::set_raw_type(int value) {
   message_type_.store(this, Smi::FromInt(value));

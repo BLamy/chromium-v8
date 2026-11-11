@@ -1562,6 +1562,22 @@ BytecodeArrayBuilder&
 BytecodeArrayBuilder::RecordReplayIncExecutionProgressCounter() {
   if (emit_record_replay_opcodes_) {
     OutputRecordReplayIncExecutionProgressCounter();
+  } else if (recordreplay::IsReplaying()) {
+    OutputRecordReplayNotifyActivity();
+  }
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::ReplayIncJsFrameDepth() {
+  if (emit_record_replay_opcodes_) {
+    OutputReplayIncJsFrameDepth();
+  }
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::ReplayDecJsFrameDepth() {
+  if (emit_record_replay_opcodes_) {
+    OutputReplayDecJsFrameDepth();
   }
   return *this;
 }
@@ -1585,6 +1601,37 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::RecordReplayInstrumentation(
     if (index >= 0) {
       OutputRecordReplayInstrumentation(index);
     }
+  }
+  return *this;
+}
+
+BytecodeArrayBuilder&
+BytecodeArrayBuilder::RecordReplayInstrumentationGenerator(
+    const char* kind, Register generator_object) {
+  if (emit_record_replay_opcodes_) {
+    int index = RecordReplayRegisterInstrumentationSite(kind, kNoSourcePosition);
+    if (index >= 0) {
+      OutputRecordReplayInstrumentationGenerator(index, generator_object);
+    }
+  }
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::RecordReplayInstrumentationReturn(
+    const char* kind, Register return_value, int source_position) {
+  if (emit_record_replay_opcodes_) {
+    int index = RecordReplayRegisterInstrumentationSite(kind, source_position);
+    if (index >= 0) {
+      OutputRecordReplayInstrumentationReturn(index, return_value);
+    }
+  }
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::RecordReplayTrackObjectId(
+    Register object) {
+  if (emit_record_replay_opcodes_) {
+    OutputRecordReplayTrackObjectId(object);
   }
   return *this;
 }

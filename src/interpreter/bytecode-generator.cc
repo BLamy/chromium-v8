@@ -43,6 +43,7 @@
 #include "src/objects/template-objects.h"
 #include "src/parsing/parse-info.h"
 #include "src/parsing/token.h"
+#include "src/replay/replay-internal.h"
 #include "src/utils/ostreams.h"
 
 #ifdef DEBUG
@@ -1800,6 +1801,7 @@ void BytecodeGenerator::GenerateBodyPrologue() {
   // Entering a function is a point the replay can name. A resumable function's
   // frame is announced once its generator object exists.
   builder()->RecordReplayIncExecutionProgressCounter();
+  builder()->ReplayIncJsFrameDepth();
   if (!IsResumableFunction(literal->kind())) {
     builder()->RecordReplayInstrumentation("main");
   }
@@ -3071,6 +3073,9 @@ void BytecodeGenerator::BuildTryFinally(
 
   try_control_builder.BeginFinally();
 
+  // See BuildTryCatch for why the progress counter advances here.
+  builder()->RecordReplayIncExecutionProgressCounter();
+
   // Evaluate the finally-block.
   finally_body_func(token, result, message);
   try_control_builder.EndFinally();
@@ -4278,6 +4283,24 @@ void BytecodeGenerator::VisitObjectLiteral(ObjectLiteral* expr) {
       object_literals_.push_back(std::make_pair(expr->builder(), entry));
     }
     BuildCreateObjectLiteral(literal, flags, entry);
+
+    // Check if any constant properties indicate the object should be tracked.
+    if (builder()->RecordReplayEmitsOpcodes()) {
+      for (int i = 0; i < expr->properties()->length(); i++) {
+        ObjectLiteral::Property* prop = expr->properties()->at(i);
+        if (prop->is_computed_name()) break;
+        if (prop->kind() == ObjectLiteral::Property::CONSTANT &&
+            prop->IsCompileTimeValue()) {
+          Literal* key_lit = prop->key()->AsLiteral();
+          if (key_lit && key_lit->IsStringLiteral() &&
+              RecordReplayTrackThisObjectAssignment(
+                  key_lit->AsRawPropertyName())) {
+            builder()->RecordReplayTrackObjectId(literal);
+            break;
+          }
+        }
+      }
+    }
   }
 
   // Store computed values into the literal.
@@ -4878,7 +4901,13 @@ void BytecodeGenerator::BuildReturn(int source_position) {
         Runtime::kTraceExit, result);
   }
   builder()->SetStatementPosition(source_position, true, false);
-  builder()->RecordReplayInstrumentation("exit");
+  if (builder()->RecordReplayEmitsOpcodes()) {
+    RegisterAllocationScope register_scope(this);
+    Register return_value = register_allocator()->NewRegister();
+    builder()->StoreAccumulatorInRegister(return_value);
+    builder()->ReplayDecJsFrameDepth();
+    builder()->RecordReplayInstrumentationReturn("exit", return_value);
+  }
   builder()->Return();
 }
 
@@ -5190,6 +5219,13 @@ void BytecodeGenerator::BuildLoadNamedProperty(const Expression* object_expr,
 void BytecodeGenerator::BuildSetNamedProperty(const Expression* object_expr,
                                               Register object,
                                               const AstRawString* name) {
+  if (builder()->RecordReplayEmitsOpcodes() && !record_replay_has_track_this_ &&
+      object_expr->IsThisExpression() &&
+      RecordReplayTrackThisObjectAssignment(name)) {
+    builder()->RecordReplayTrackObjectId(object);
+    record_replay_has_track_this_ = true;
+  }
+
   Register value;
   if (!execution_result()->IsEffect()) {
     value = register_allocator()->NewRegister();
@@ -6146,6 +6182,7 @@ void BytecodeGenerator::BuildSuspendPoint(int position) {
 
   RegisterList registers = register_allocator()->AllLiveRegisters();
 
+  builder()->ReplayDecJsFrameDepth();
   builder()->RecordReplayInstrumentation("exit");
 
   // Save context, registers, and state. This bytecode then returns the value
@@ -6161,7 +6198,9 @@ void BytecodeGenerator::BuildSuspendPoint(int position) {
   builder()->ResumeGenerator(generator_object(), registers);
 
   builder()->RecordReplayIncExecutionProgressCounter();
-  builder()->RecordReplayInstrumentation("entry");
+  builder()->ReplayIncJsFrameDepth();
+  builder()->RecordReplayInstrumentationGenerator("generator",
+                                                  generator_object());
 }
 
 void BytecodeGenerator::VisitYield(Yield* expr) {
@@ -8922,7 +8961,8 @@ void BytecodeGenerator::BuildGeneratorObjectVariableInitialization() {
       .CallRuntime(function_id, args)
       .StoreAccumulatorInRegister(generator_object());
 
-  builder()->RecordReplayInstrumentation("generator");
+  builder()->RecordReplayInstrumentationGenerator("generator",
+                                                  generator_object());
 
   if (generator_object_var->location() == VariableLocation::LOCAL) {
     // The generator object register is already set to the variable's local

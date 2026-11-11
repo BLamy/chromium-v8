@@ -46,6 +46,7 @@
 #include "src/regexp/regexp-macro-assembler-arch.h"
 #include "src/regexp/regexp-result-vector.h"
 #include "src/regexp/regexp-stack.h"
+#include "src/replay/replay-internal.h"
 #include "src/sandbox/testing.h"
 #include "src/strings/string-search.h"
 #include "src/strings/unicode-inl.h"
@@ -820,6 +821,10 @@ ExternalReference ExternalReference::address_of_builtin_subclassing_flag() {
 
 ExternalReference ExternalReference::address_of_js_pr_3883_flag() {
   return ExternalReference(&v8_flags.js_pr_3883);
+}
+
+ExternalReference ExternalReference::address_of_record_replay_js_frame_depth() {
+  return ExternalReference(&gRecordReplayJsFrameDepth);
 }
 
 ExternalReference ExternalReference::address_of_runtime_stats_flag() {

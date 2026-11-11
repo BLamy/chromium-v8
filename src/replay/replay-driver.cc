@@ -23,6 +23,7 @@ namespace {
 void (*gOnNewSource)(const char* id, const char* kind, const char* url);
 void (*gOnConsoleMessage)(size_t bookmark);
 void (*gOnExceptionUnwind)();
+void (*gNotifyActivity)();
 void (*gPrint)(const char* format, va_list args);
 void (*gDiagnostic)(const char* format, va_list args);
 void (*gOnInstrument)(const char* kind, const char* function,
@@ -100,6 +101,7 @@ void SetRecordingOrReplaying(void* handle) {
   LoadSymbol(handle, "RecordReplayOnNewSource", gOnNewSource);
   LoadSymbol(handle, "RecordReplayOnConsoleMessage", gOnConsoleMessage);
   LoadSymbol(handle, "RecordReplayOnExceptionUnwind", gOnExceptionUnwind);
+  LoadSymbol(handle, "RecordReplayNotifyActivity", gNotifyActivity);
   LoadSymbol(handle, "RecordReplayPrint", gPrint);
   LoadSymbol(handle, "RecordReplayDiagnostic", gDiagnostic);
   LoadSymbol(handle, "RecordReplayOnInstrument", gOnInstrument);
@@ -165,6 +167,11 @@ void SetRecordingOrReplaying(void* handle) {
              set_progress_interrupt_callback);
   set_progress_interrupt_callback([]() {});
 
+  void (*set_track_objects_callback)(void (*)(bool));
+  LoadSymbol(handle, "RecordReplaySetTrackObjectsCallback",
+             set_track_objects_callback);
+  set_track_objects_callback(internal::RecordReplayTrackObjectsCallback);
+
   // Checkpoints every so much JS, which the engine and timeline both use.
   void (*enable_progress_checkpoints)();
   LoadSymbol(handle, "RecordReplayEnableProgressCheckpoints",
@@ -188,6 +195,27 @@ namespace recordreplay {
 bool gIsRecordingOrReplaying = false;
 
 bool IsRecording() { return IsRecordingOrReplaying() && !IsReplaying(); }
+
+void NotifyActivity() {
+  if (IsRecordingOrReplaying()) gNotifyActivity();
+}
+
+namespace {
+size_t gInReplayCode;
+}  // namespace
+
+void EnterReplayCode() {
+  if (IsMainThread()) gInReplayCode++;
+}
+
+void ExitReplayCode() {
+  if (IsMainThread()) {
+    CHECK_GT(gInReplayCode, 0u);
+    gInReplayCode--;
+  }
+}
+
+bool IsInReplayCode() { return IsMainThread() && gInReplayCode; }
 
 bool IsReplaying() { return IsRecordingOrReplaying() && gIsReplaying(); }
 

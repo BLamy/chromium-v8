@@ -23,6 +23,7 @@
 #include "src/objects/struct-inl.h"
 #include "src/parsing/parse-info.h"
 #include "src/parsing/parsing.h"
+#include "src/replay/replay-internal.h"
 #include "src/roots/roots.h"
 #include "src/sandbox/trusted-pointer-inl.h"
 #include "src/strings/string-builder-inl.h"
@@ -91,9 +92,12 @@ Handle<JSMessageObject> MessageHandler::MakeMessageObject(
     shared_info = location->shared();
   }
 
-  return isolate->factory()->NewJSMessageObject(message, argument, start, end,
-                                                shared_info, bytecode_offset,
-                                                script_handle, stack_trace);
+  Handle<JSMessageObject> message_obj = isolate->factory()->NewJSMessageObject(
+      message, argument, start, end, shared_info, bytecode_offset,
+      script_handle, stack_trace);
+  message_obj->set_record_replay_bookmark(
+      RecordReplayNewMessageBookmark(isolate));
+  return message_obj;
 }
 
 void MessageHandler::ReportMessage(Isolate* isolate, const MessageLocation* loc,

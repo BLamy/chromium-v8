@@ -683,6 +683,8 @@ class BytecodeGenerator final : public AstVisitor<BytecodeGenerator> {
 
   BytecodeJumpTable* generator_jump_table_;
   int suspend_count_;
+  // Whether this function's |this| has been given a persistent ID already.
+  bool record_replay_has_track_this_ = false;
   // TODO(solanes): assess if we can move loop_depth_ into LoopScope.
   int loop_depth_;
 

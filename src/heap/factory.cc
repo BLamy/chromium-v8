@@ -4440,6 +4440,7 @@ Handle<JSMessageObject> Factory::NewJSMessageObject(
     message_obj->set_stack_trace(*stack_trace, SKIP_WRITE_BARRIER);
   }
   message_obj->set_error_level(v8::Isolate::kMessageError);
+  message_obj->set_record_replay_bookmark(0);
   return handle(message_obj, isolate());
 }
 
