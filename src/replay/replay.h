@@ -48,6 +48,11 @@ V8_EXPORT_PRIVATE void Diagnostic(const char* format, ...);
 // be the same on both sides; |contents| is only looked at when replaying.
 V8_EXPORT_PRIVATE void OnAnnotation(const char* kind, const char* contents);
 
+// An inspector session a replay made for its own commands. It isn't there
+// while recording, so nothing it does is part of a recording. Main thread.
+V8_EXPORT_PRIVATE void AddReplayOwnedInspectorSession(const void* session);
+V8_EXPORT_PRIVATE bool IsReplayOwnedInspectorSession(const void* session);
+
 // The exception that's unwinding, while the driver is told about it.
 V8_EXPORT_PRIVATE bool GetCurrentException(v8::Local<v8::Value>* exception);
 

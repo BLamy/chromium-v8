@@ -205,13 +205,15 @@ namespace {
 // messages come with events disallowed. |get_cbor| is only called when
 // replaying, which is the only time what the message said is wanted.
 template <typename GetCbor>
-void RecordReplayMessageAnnotation(const char* kind,
+void RecordReplayMessageAnnotation(const V8InspectorSession* session,
+                                   const char* kind,
                                    int context_group_id,
                                    int session_id,
                                    GetCbor get_cbor) {
   if (!v8::recordreplay::IsRecordingOrReplaying() ||
       !v8::recordreplay::IsMainThread() ||
-      v8::recordreplay::AreEventsDisallowed()) {
+      v8::recordreplay::AreEventsDisallowed() ||
+      v8::recordreplay::IsReplayOwnedInspectorSession(session)) {
     return;
   }
   std::string json;
@@ -237,7 +239,7 @@ void RecordReplayMessageAnnotation(const char* kind,
 void V8InspectorSessionImpl::SendProtocolResponse(
     int callId, std::unique_ptr<protocol::Serializable> message) {
   std::vector<uint8_t> record_replay_cbor;
-  RecordReplayMessageAnnotation("inspector-protocol-response",
+  RecordReplayMessageAnnotation(this, "inspector-protocol-response",
                                 m_contextGroupId, m_sessionId, [&]() {
                                   record_replay_cbor = message->Serialize();
                                   return v8_crdtp::SpanFrom(record_replay_cbor);
@@ -248,7 +250,7 @@ void V8InspectorSessionImpl::SendProtocolResponse(
 void V8InspectorSessionImpl::SendProtocolNotification(
     std::unique_ptr<protocol::Serializable> message) {
   std::vector<uint8_t> record_replay_cbor;
-  RecordReplayMessageAnnotation("inspector-protocol-notification",
+  RecordReplayMessageAnnotation(this, "inspector-protocol-notification",
                                 m_contextGroupId, m_sessionId, [&]() {
                                   record_replay_cbor = message->Serialize();
                                   return v8_crdtp::SpanFrom(record_replay_cbor);
@@ -458,7 +460,7 @@ void V8InspectorSessionImpl::dispatchProtocolMessage(
     }
     cbor = SpanFrom(converted_cbor);
   }
-  RecordReplayMessageAnnotation("inspector-protocol-dispatch",
+  RecordReplayMessageAnnotation(this, "inspector-protocol-dispatch",
                                 m_contextGroupId, m_sessionId,
                                 [&]() { return cbor; });
   std::string associated_data_copy;

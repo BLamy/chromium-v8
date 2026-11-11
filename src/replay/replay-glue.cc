@@ -308,6 +308,7 @@ IsolateGlue* EnsureGlue(v8::Isolate* isolate) {
       kContextGroupId, &glue->channel, v8_inspector::StringView(),
       v8_inspector::V8Inspector::kFullyTrusted,
       v8_inspector::V8Inspector::kNotWaitingForDebugger);
+  recordreplay::AddReplayOwnedInspectorSession(glue->session.get());
 
   v8::Local<v8::Context> context = v8::Context::New(isolate);
   glue->context.Reset(isolate, context);

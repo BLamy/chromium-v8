@@ -6,6 +6,7 @@
 // replaying. Both are reached the same way: dlopen and dlsym are the engine's
 // when replaying, which answers these names itself.
 
+#include <vector>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -222,6 +223,25 @@ uintptr_t RecordReplayValue(const char* why, uintptr_t value) {
 
 void RecordReplayBytes(const char* why, void* buf, size_t size) {
   if (IsRecordingOrReplaying()) gBytes(why, buf, size);
+}
+
+namespace {
+std::vector<const void*>* gReplayOwnedSessions = nullptr;
+}  // namespace
+
+void AddReplayOwnedInspectorSession(const void* session) {
+  if (!gReplayOwnedSessions) {
+    gReplayOwnedSessions = new std::vector<const void*>();
+  }
+  gReplayOwnedSessions->push_back(session);
+}
+
+bool IsReplayOwnedInspectorSession(const void* session) {
+  if (!gReplayOwnedSessions) return false;
+  for (const void* owned : *gReplayOwnedSessions) {
+    if (owned == session) return true;
+  }
+  return false;
 }
 
 void OnAnnotation(const char* kind, const char* contents) {

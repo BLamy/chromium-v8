@@ -54,6 +54,7 @@
 #include "src/inspector/v8-inspector-session-impl.h"
 #include "src/inspector/v8-stack-trace-impl.h"
 #include "src/inspector/v8-value-utils.h"
+#include "src/replay/replay.h"
 #include "src/tracing/trace-event.h"
 
 namespace v8_inspector {
@@ -1138,8 +1139,14 @@ Response V8RuntimeAgentImpl::enable() {
   TRACE_EVENT(TRACE_DISABLED_BY_DEFAULT("v8.inspector"),
               "V8RuntimeAgentImpl::enable",
               perfetto::Flow::ProcessScoped(reinterpret_cast<uintptr_t>(this)));
-  m_inspector->client()->beginEnsureAllContextsInGroup(
-      m_session->contextGroupId());
+  // A replay's own session takes the page's contexts as they are: making the
+  // ones a page hasn't made yet would be the replay changing the page.
+  const bool replay_owned = v8::recordreplay::IsReplayOwnedInspectorSession(
+      static_cast<V8InspectorSession*>(m_session));
+  if (!replay_owned) {
+    m_inspector->client()->beginEnsureAllContextsInGroup(
+        m_session->contextGroupId());
+  }
   m_enabled = true;
   m_state->setBoolean(V8RuntimeAgentImplState::runtimeEnabled, true);
   m_inspector->debugger()->setMaxCallStackSizeToCapture(

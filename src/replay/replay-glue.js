@@ -620,8 +620,7 @@ const CommandCallbacks = {
 
 function commandCallback(method, paramsText) {
   let callback = CommandCallbacks[method];
-  if (!callback && (method.startsWith("DOM.") || method.startsWith("CSS.") ||
-                    method.startsWith("Graphics."))) {
+  if (!callback && (method.startsWith("DOM.") || method.startsWith("CSS."))) {
     const bundle = getDomBundle();
     callback = bundle && bundle.commands[method];
   }

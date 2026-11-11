@@ -528,7 +528,11 @@ Response V8DebuggerAgentImpl::enable(std::optional<double> maxScriptsCacheSize,
       m_debugger->debuggerIdFor(m_session->contextGroupId()).toString();
   if (enabled()) return Response::Success();
 
-  if (!m_inspector->client()->canExecuteScripts(m_session->contextGroupId())) {
+  // A replay's own session is enabled whatever state the page is in when
+  // its first command comes.
+  if (!v8::recordreplay::IsReplayOwnedInspectorSession(
+          static_cast<V8InspectorSession*>(m_session)) &&
+      !m_inspector->client()->canExecuteScripts(m_session->contextGroupId())) {
     return Response::ServerError("Script execution is prohibited");
   }
 
