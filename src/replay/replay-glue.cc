@@ -172,6 +172,11 @@ void NativePageCommand(const v8::FunctionCallbackInfo<v8::Value>& info) {
   info.GetReturnValue().Set(ToV8String(isolate, answer.c_str()));
 }
 
+void NativeCurrentPageError(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  const char* error = RecordReplayCurrentPageError();
+  info.GetReturnValue().Set(ToV8String(info.GetIsolate(), error ? error : ""));
+}
+
 // Whether a script's frames are hidden, by the ID the inspector reports it with.
 void NativeIgnoreScript(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::String::Utf8Value id(info.GetIsolate(), info[0]);
@@ -259,6 +264,7 @@ IsolateGlue* EnsureGlue(v8::Isolate* isolate) {
   AddNative(isolate, context, rr, "sendCDPMessage", NativeSendCDPMessage);
   AddNative(isolate, context, rr, "ignoreScript", NativeIgnoreScript);
   AddNative(isolate, context, rr, "pageCommand", NativePageCommand);
+  AddNative(isolate, context, rr, "currentPageError", NativeCurrentPageError);
   AddNative(isolate, context, rr, "currentConsoleCall", NativeCurrentConsoleCall);
 
   v8::TryCatch try_catch(isolate);
@@ -444,4 +450,41 @@ extern "C" V8_EXPORT void V8RecordReplayEndReplayCode() {
     *v8::internal::gProgressCounter = progress;
   }
   v8::recordreplay::EndDisallowEvents();
+}
+
+// An uncaught error, which the embedder knows about and V8's console doesn't.
+// The driver reads what it says, with a command, before this returns.
+extern "C" V8_EXPORT void V8RecordReplayOnPageError(const char* message,
+                                                    const char* url,
+                                                    int line, int column,
+                                                    int script_id) {
+  if (!v8::recordreplay::IsRecordingOrReplaying() ||
+      !v8::recordreplay::IsMainThread() ||
+      v8::recordreplay::AreEventsDisallowed()) {
+    return;
+  }
+  auto escape = [](const char* text) {
+    std::string out;
+    for (const char* p = text ? text : ""; *p; p++) {
+      unsigned char c = static_cast<unsigned char>(*p);
+      if (c == '"' || c == '\\') {
+        out += '\\';
+        out += static_cast<char>(c);
+      } else if (c < 0x20) {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "\\u%04x", c);
+        out += buf;
+      } else {
+        out += static_cast<char>(c);
+      }
+    }
+    return out;
+  };
+  std::string json = "{\"message\":\"" + escape(message) + "\",\"url\":\"" +
+                     escape(url) + "\",\"line\":" + std::to_string(line) +
+                     ",\"column\":" + std::to_string(column) +
+                     ",\"scriptId\":" + std::to_string(script_id) + "}";
+  v8::internal::RecordReplaySetCurrentPageError(json.c_str());
+  v8::internal::RecordReplayOnConsoleMessage(0);
+  v8::internal::RecordReplaySetCurrentPageError(nullptr);
 }

@@ -628,6 +628,16 @@ void RecordReplayOnIsolateDispose(Isolate* isolate) {
   }
 }
 
+namespace {
+const char* gCurrentPageError = nullptr;
+}  // namespace
+
+void RecordReplaySetCurrentPageError(const char* json) {
+  gCurrentPageError = json;
+}
+
+const char* RecordReplayCurrentPageError() { return gCurrentPageError; }
+
 void RecordReplaySetCurrentConsoleCall(const char* level, void* args) {
   gCurrentConsoleLevel = level;
   gCurrentConsoleArgs = args;

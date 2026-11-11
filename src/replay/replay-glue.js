@@ -514,6 +514,20 @@ const ConsoleLevels = new Set(["info", "warning", "error", "timeEnd"]);
 // The console call that's happening now, which C++ describes as it's in V8's own
 // console builtin rather than in a frame on the stack.
 function Target_getCurrentMessageContents() {
+  // An uncaught error, which the embedder reports, or a console call.
+  const errorText = rr.currentPageError();
+  if (errorText) {
+    const error = JSON.parse(errorText);
+    return {
+      source: "PageError",
+      level: "error",
+      text: error.message,
+      url: error.url || undefined,
+      sourceId: error.scriptId > 0 ? String(error.scriptId) : undefined,
+      line: error.line,
+      column: error.column,
+    };
+  }
   const call = JSON.parse(rr.currentConsoleCall());
   let url, sourceId, line, column;
   const { frameLocations } = sendMessage("Debugger.getFrameLocations", {});

@@ -73,6 +73,9 @@ V8_EXPORT_PRIVATE void RecordReplaySetCurrentConsoleCall(
     const char* level, void* args /* BuiltinArguments* */);
 V8_EXPORT_PRIVATE void RecordReplayGetCurrentConsoleCall(const char** level,
                                                          void** args);
+// An uncaught error the embedder is reporting to the driver, as JSON, or null.
+V8_EXPORT_PRIVATE void RecordReplaySetCurrentPageError(const char* json);
+V8_EXPORT_PRIVATE const char* RecordReplayCurrentPageError();
 
 // The commands written in JS need the inspector, which not every binary with V8
 // in it has (mksnapshot doesn't), so replay-glue.cc registers these.
