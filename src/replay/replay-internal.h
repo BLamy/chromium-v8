@@ -33,6 +33,11 @@ void RecordReplayInstrument(const char* kind, const char* function,
 void RecordReplayAddPossibleBreakpoint(int line, int column,
                                        const char* function,
                                        int function_index);
+// What a replay wants a script's source to be instead, or null. Whoever is
+// replaying can hand over a rewritten source for a script, to have its own
+// calls made from inside the program's code.
+V8_EXPORT_PRIVATE const char* RecordReplayReplaceSourceContents(
+    const char* contents);
 
 // replay-runtime.cc
 V8_EXPORT_PRIVATE int RegisterInstrumentationSite(const char* kind,
@@ -52,6 +57,9 @@ V8_EXPORT_PRIVATE bool RecordReplayIgnoreScriptByURL(const char* url);
 V8_EXPORT_PRIVATE void RecordReplayRegisterScript(Isolate* isolate,
                                                   DirectHandle<Script> script);
 V8_EXPORT_PRIVATE int RecordReplayNextScriptId();
+// While set, the next script made gets this ID: a script compiled from
+// replaced source stands in for the one the recording has.
+V8_EXPORT_PRIVATE void RecordReplaySetReplacementScriptId(int script_id);
 // Scripts live for as long as their isolate, and can't be read after it's gone.
 V8_EXPORT_PRIVATE void RecordReplayOnIsolateDispose(Isolate* isolate);
 bool RecordReplayIsRegisteredScript(int script_id);

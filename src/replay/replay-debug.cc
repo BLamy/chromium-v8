@@ -485,7 +485,16 @@ bool RecordReplayIgnoreScriptByURL(const char* url) {
   return false;
 }
 
+namespace {
+int gReplacementScriptId = 0;
+}  // namespace
+
+void RecordReplaySetReplacementScriptId(int script_id) {
+  gReplacementScriptId = script_id;
+}
+
 int RecordReplayNextScriptId() {
+  if (gReplacementScriptId) return gReplacementScriptId;
   if (recordreplay::IsMainThread() && !recordreplay::AreEventsDisallowed()) {
     return gNextScriptId++;
   }

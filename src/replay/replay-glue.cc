@@ -128,6 +128,50 @@ void NativeSendCDPMessage(const v8::FunctionCallbackInfo<v8::Value>& info) {
   info.GetReturnValue().Set(ToV8String(isolate, glue->channel.TakeResponse()));
 }
 
+// What the embedder answers commands with, in a page's own context: Blink
+// knows about the DOM, and what's evaluated there sees the page.
+}  // namespace
+
+struct PageCommandHandler {
+  v8::Global<v8::Context> context;
+  v8::Global<v8::Function> function;
+};
+std::map<v8::Isolate*, PageCommandHandler>* gPageCommandHandlers;
+
+namespace {
+
+// The embedder's answer to a command the glue has no callback for, as JSON,
+// or undefined when it has none either.
+void NativePageCommand(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  if (!gPageCommandHandlers) return;
+  auto iter = gPageCommandHandlers->find(isolate);
+  if (iter == gPageCommandHandlers->end()) return;
+  v8::String::Utf8Value method(isolate, info[0]);
+  v8::String::Utf8Value params(isolate, info[1]);
+  v8::Local<v8::Context> context = iter->second.context.Get(isolate);
+  std::string answer;
+  {
+    v8::Context::Scope context_scope(context);
+    v8::TryCatch try_catch(isolate);
+    v8::Local<v8::Value> args[] = {ToV8String(isolate, *method ? *method : ""),
+                                   ToV8String(isolate, *params ? *params : "")};
+    v8::Local<v8::Value> result;
+    if (!iter->second.function.Get(isolate)
+             ->Call(context, v8::Undefined(isolate), 2, args)
+             .ToLocal(&result)) {
+      v8::String::Utf8Value error(isolate, try_catch.Exception());
+      recordreplay::Print("Page command %s threw: %s", *method ? *method : "",
+                          *error ? *error : "");
+      return;
+    }
+    if (!result->IsString()) return;
+    v8::String::Utf8Value text(isolate, result);
+    answer = *text ? *text : "";
+  }
+  info.GetReturnValue().Set(ToV8String(isolate, answer.c_str()));
+}
+
 // Whether a script's frames are hidden, by the ID the inspector reports it with.
 void NativeIgnoreScript(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::String::Utf8Value id(info.GetIsolate(), info[0]);
@@ -214,6 +258,7 @@ IsolateGlue* EnsureGlue(v8::Isolate* isolate) {
   AddNative(isolate, context, rr, "log", NativeLog);
   AddNative(isolate, context, rr, "sendCDPMessage", NativeSendCDPMessage);
   AddNative(isolate, context, rr, "ignoreScript", NativeIgnoreScript);
+  AddNative(isolate, context, rr, "pageCommand", NativePageCommand);
   AddNative(isolate, context, rr, "currentConsoleCall", NativeCurrentConsoleCall);
 
   v8::TryCatch try_catch(isolate);
@@ -320,6 +365,9 @@ void RecordReplayClearGluePauseData(Isolate* i_isolate) {
 }
 
 void RecordReplayDisposeGlue(Isolate* i_isolate) {
+  if (gPageCommandHandlers) {
+    gPageCommandHandlers->erase(reinterpret_cast<v8::Isolate*>(i_isolate));
+  }
   if (!gGlue) return;
   auto iter = gGlue->find(reinterpret_cast<v8::Isolate*>(i_isolate));
   if (iter == gGlue->end()) return;
@@ -338,3 +386,25 @@ void RecordReplayInstallGlue() {
 
 }  // namespace internal
 }  // namespace v8
+
+// For the embedder, which doesn't see V8's internal headers. Blink declares
+// these where it calls them.
+
+// A function of (method, params as JSON) that answers a command with JSON, or
+// with undefined for one it doesn't have. The newest one set is asked.
+extern "C" V8_EXPORT void V8RecordReplaySetPageCommandHandler(
+    v8::Isolate* isolate, v8::Local<v8::Context> context,
+    v8::Local<v8::Function> function) {
+  using v8::internal::gPageCommandHandlers;
+  if (!gPageCommandHandlers) {
+    gPageCommandHandlers =
+        new std::map<v8::Isolate*, v8::internal::PageCommandHandler>();
+  }
+  v8::internal::PageCommandHandler& handler = (*gPageCommandHandlers)[isolate];
+  handler.context.Reset(isolate, context);
+  handler.function.Reset(isolate, function);
+}
+
+extern "C" V8_EXPORT uint64_t V8RecordReplayProgressCounter() {
+  return v8::internal::gProgressCounter ? *v8::internal::gProgressCounter : 0;
+}

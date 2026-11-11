@@ -500,6 +500,11 @@ const CommandCallbacks = {
 function commandCallback(method, paramsText) {
   const callback = CommandCallbacks[method];
   if (!callback) {
+    // The embedder has commands of its own, which it answers in the page.
+    const answer = rr.pageCommand(method, paramsText || "{}");
+    if (typeof answer === "string") {
+      return answer;
+    }
     log(`Missing command callback: ${method}`);
     return "{}";
   }

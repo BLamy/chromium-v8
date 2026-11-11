@@ -38,6 +38,7 @@ void (*gBeginDisallowEventsWithLabel)(const char* label);
 void (*gEndDisallowEvents)();
 bool (*gIsReplaying)();
 bool (*gHasDivergedFromRecording)();
+const char* (*gReplaceSourceContents)(const char* contents);
 
 pthread_t gMainThread;
 
@@ -114,6 +115,10 @@ void SetRecordingOrReplaying(void* handle) {
   LoadSymbol(handle, "RecordReplayIsReplaying", gIsReplaying);
   LoadSymbol(handle, "RecordReplayHasDivergedFromRecording",
              gHasDivergedFromRecording);
+
+  // Not every driver has this one.
+  gReplaceSourceContents = reinterpret_cast<const char* (*)(const char*)>(
+      dlsym(handle, "RecordReplayReplaceSourceContents"));
 
   gMainThread = pthread_self();
   recordreplay::gIsRecordingOrReplaying = true;
@@ -251,6 +256,10 @@ bool gRecordReplayInstrumentationEnabled;
 void RecordReplayOnNewSource(const char* id, const char* kind,
                              const char* url) {
   gOnNewSource(id, kind, url);
+}
+
+const char* RecordReplayReplaceSourceContents(const char* contents) {
+  return gReplaceSourceContents ? gReplaceSourceContents(contents) : nullptr;
 }
 
 void RecordReplayOnConsoleMessage(size_t bookmark) {

@@ -3918,6 +3918,44 @@ MaybeDirectHandle<SharedFunctionInfo> CompileScriptOnMainThread(
   // Known about as soon as it's compiled: a module isn't instantiated until its
   // whole import graph has loaded, and never is if that fails.
   if (!result.is_null()) RecordReplayRegisterScript(isolate, script);
+
+  // A replay can ask for this script to run from other source: its own
+  // rewriting of it, with calls of its own put in. The script above is what
+  // the recording has and what the debugger describes. What runs is a second
+  // script with the same ID, as upstream's ReplayingMaybeReplaceScript.
+  if (!result.is_null() && recordreplay::IsReplaying() &&
+      recordreplay::IsMainThread() && !recordreplay::AreEventsDisallowed() &&
+      natives == NOT_NATIVES_CODE && !flags.record_replay_ignore() &&
+      !maybe_script.ToHandle(&script)) {
+    std::unique_ptr<char[]> contents = source->ToCString();
+    const char* replaced = RecordReplayReplaceSourceContents(contents.get());
+    if (replaced) {
+      Handle<String> new_source =
+          isolate->factory()
+              ->NewStringFromUtf8(base::Vector<const uint8_t>(
+                  reinterpret_cast<const uint8_t*>(replaced), strlen(replaced)))
+              .ToHandleChecked();
+      UnoptimizedCompileState new_compile_state;
+      ReusableUnoptimizedCompileState new_reusable_state(isolate);
+      ParseInfo new_parse_info(isolate, flags, &new_compile_state,
+                               &new_reusable_state);
+      new_parse_info.set_extension(extension);
+      RecordReplaySetReplacementScriptId(script->id());
+      Handle<Script> new_script = NewScript(isolate, &new_parse_info,
+                                            new_source, script_details, natives);
+      RecordReplaySetReplacementScriptId(0);
+      IsCompiledScope new_compiled_scope;
+      MaybeHandle<SharedFunctionInfo> new_result = Compiler::CompileToplevel(
+          &new_parse_info, new_script, isolate, &new_compiled_scope);
+      if (!new_result.is_null()) {
+        *is_compiled_scope = new_compiled_scope;
+        return new_result;
+      }
+      recordreplay::Print("Replaced source for script %d didn't compile",
+                          script->id());
+      if (isolate->has_exception()) isolate->clear_exception();
+    }
+  }
   return result;
 }
 
