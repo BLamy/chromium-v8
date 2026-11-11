@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <optional>
 
 #include "include/v8-container.h"
@@ -23,6 +24,7 @@
 #include "src/inspector/v8-inspector-impl.h"
 #include "src/inspector/v8-serialization-duplicate-tracker.h"
 #include "src/inspector/v8-value-utils.h"
+#include "src/replay/replay.h"
 
 namespace v8_inspector {
 
@@ -1618,6 +1620,19 @@ std::unique_ptr<ValueMirror> createNativeSetter(v8::Local<v8::Context> context,
   return ValueMirror::create(context, function);
 }
 
+// Getters the inspector may call at a pause in a replay. From upstream
+// Replay's list (RUN-1478).
+const char* const kReplayAllowedGetters[] = {
+    "type",        "fromElement",   "target",           "isTrusted",
+    "key",         "clientX",       "clientY",          "altKey",
+    "button",      "buttons",       "ctrlKey",          "currentTarget",
+    "defaultPrevented", "eventPhase", "metaKey",        "movementX",
+    "movementY",   "offsetX",       "offsetY",          "pageX",
+    "pageY",       "screenX",       "screenY",          "shiftKey",
+    "srcElement",  "timeStamp",     "which",            "x",
+    "y",
+};
+
 bool doesAttributeHaveObservableSideEffectOnGet(v8::Local<v8::Context> context,
                                                 v8::Local<v8::Object> object,
                                                 v8::Local<v8::Name> name) {
@@ -1625,6 +1640,18 @@ bool doesAttributeHaveObservableSideEffectOnGet(v8::Local<v8::Context> context,
   // side-effect free, and call all getters which do not produce side effects.
   if (!name->IsString()) return false;
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
+
+  if (v8::recordreplay::AreEventsDisallowed()) {
+    // At a pause in a replay a native getter can do anything, including a
+    // sync IPC that was never recorded (localStorage does). Only call the
+    // ones known to be plain reads; the rest show as accessors.
+    v8::String::Utf8Value nameRaw(isolate, name.As<v8::String>());
+    if (!*nameRaw) return true;
+    for (const char* allowed : kReplayAllowedGetters) {
+      if (!strcmp(allowed, *nameRaw)) return false;
+    }
+    return true;
+  }
   if (!name.As<v8::String>()->StringEquals(toV8String(isolate, "body"))) {
     return false;
   }
