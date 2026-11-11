@@ -9,6 +9,7 @@
 
 #include "src/ast/ast.h"
 #include "src/base/logging.h"
+#include "src/replay/replay.h"
 #include "src/builtins/accessors.h"
 #include "src/common/message-template.h"
 #include "src/heap/local-factory-inl.h"
@@ -1146,6 +1147,13 @@ Variable* DeclarationScope::DeclareParameter(const AstRawString* name,
   if (name == ast_value_factory->arguments_string()) {
     set_has_arguments_parameter(true);
   }
+  // When replaying, every variable lives in a context, so that one a nested
+  // function doesn't use is still there to read at a pause inside it. From
+  // upstream Replay's V8 (RUN-2604), which found no way to leave leaf
+  // functions out at this level either.
+  if (recordreplay::IsReplaying()) {
+    var->ForceContextAllocation();
+  }
   return var;
 }
 
@@ -1253,6 +1261,12 @@ Variable* Scope::DeclareVariable(
     }
   }
   DCHECK_NOT_NULL(var);
+
+  // As in DeclarationScope::DeclareParameter().
+  if (recordreplay::IsReplaying() &&
+      (kind == NORMAL_VARIABLE || kind == SLOPPY_BLOCK_FUNCTION_VARIABLE)) {
+    var->ForceContextAllocation();
+  }
 
   // We add a declaration node for every declaration. The compiler
   // will only generate code if necessary. In particular, declarations
