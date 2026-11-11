@@ -126,7 +126,9 @@ void RecordReplayOnExceptionUnwind(Isolate* isolate) {
     DirectHandle<Object> exception(isolate->exception(), isolate);
     if (isolate->is_catchable_by_javascript(*exception)) {
       // The driver can run commands here, which need a clean slate.
-      isolate->clear_exception();
+      // Only V8's own: an embedder's v8::TryCatch that's waiting for this
+      // exception keeps what it knows, or the error is never reported.
+      isolate->clear_internal_exception();
       DirectHandle<Object> message(isolate->pending_message(), isolate);
       isolate->clear_pending_message();
       gCurrentException = &exception;
