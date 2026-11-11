@@ -3926,7 +3926,7 @@ MaybeDirectHandle<SharedFunctionInfo> CompileScriptOnMainThread(
   if (!result.is_null() && recordreplay::IsReplaying() &&
       recordreplay::IsMainThread() && !recordreplay::AreEventsDisallowed() &&
       natives == NOT_NATIVES_CODE && !flags.record_replay_ignore() &&
-      !maybe_script.ToHandle(&script)) {
+      maybe_script.is_null()) {
     std::unique_ptr<char[]> contents = source->ToCString();
     const char* replaced = RecordReplayReplaceSourceContents(contents.get());
     if (replaced) {
