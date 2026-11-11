@@ -485,6 +485,8 @@ extern "C" V8_EXPORT void V8RecordReplayOnPageError(const char* message,
                      ",\"column\":" + std::to_string(column) +
                      ",\"scriptId\":" + std::to_string(script_id) + "}";
   v8::internal::RecordReplaySetCurrentPageError(json.c_str());
-  v8::internal::RecordReplayOnConsoleMessage(0);
+  // No JS is running by now, so where this is has to be marked.
+  v8::internal::RecordReplayOnConsoleMessage(
+      v8::internal::RecordReplayNewBookmark());
   v8::internal::RecordReplaySetCurrentPageError(nullptr);
 }

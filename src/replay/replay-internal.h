@@ -26,6 +26,9 @@ extern uint64_t gTargetProgress;
 extern bool gRecordReplayInstrumentationEnabled;
 void RecordReplayOnNewSource(const char* id, const char* kind, const char* url);
 void RecordReplayOnConsoleMessage(size_t bookmark);
+// A place in the recording that isn't a step of the program's: where an
+// uncaught error is reported, which is after its frames have gone.
+V8_EXPORT_PRIVATE size_t RecordReplayNewBookmark();
 void RecordReplayOnExceptionUnwindRaw();
 void RecordReplayOnTargetProgressReached();
 void RecordReplayInstrument(const char* kind, const char* function,
