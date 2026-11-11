@@ -8,6 +8,7 @@
 #include "src/execution/isolate.h"
 #include "src/logging/counters.h"
 #include "src/logging/log.h"
+#include "src/replay/replay.h"
 
 namespace v8 {
 namespace internal {
@@ -30,7 +31,12 @@ class BaseTimedHistogramScope {
     return elapsed;
   }
 
+  // Nothing is timed in a process that's being recorded or replayed. Each
+  // reading of the clock is a call in the recording, and what a replay
+  // compiles isn't always what was compiled when recording: it can run a
+  // script from source it's been handed in place of the script's own.
   V8_INLINE void Start() {
+    if (recordreplay::IsRecordingOrReplaying()) return;
     if (histogram_->Enabled()) StartInternal();
   }
 
@@ -39,6 +45,9 @@ class BaseTimedHistogramScope {
   // a time of -1 microsecond. This behavior should match kTimeNotMeasured in
   // v8-script.h.
   V8_INLINE base::TimeDelta Stop() {
+    if (recordreplay::IsRecordingOrReplaying()) {
+      return base::TimeDelta::FromMicroseconds(-1);
+    }
     if (histogram_ && histogram_->Enabled()) return StopInternal();
     return base::TimeDelta::FromMicroseconds(-1);
   }
@@ -119,7 +128,7 @@ class V8_NODISCARD LazyTimedHistogramScope : public BaseTimedHistogramScope {
   explicit LazyTimedHistogramScope(int64_t* result_in_microseconds = nullptr)
       : BaseTimedHistogramScope(nullptr),
         result_in_microseconds_(result_in_microseconds) {
-    timer_.Start();
+    if (!recordreplay::IsRecordingOrReplaying()) timer_.Start();
   }
   ~LazyTimedHistogramScope() {
     // We should set the histogram before this scope exits.
@@ -174,11 +183,13 @@ class V8_NODISCARD NestedTimedHistogramScope : public BaseTimedHistogramScope {
   }
 
   V8_INLINE void Start() {
+    if (recordreplay::IsRecordingOrReplaying()) return;
     if (histogram_->Enabled()) StartInteral();
     LogStart(timed_histogram()->counters()->isolate());
   }
 
   V8_INLINE void Stop() {
+    if (recordreplay::IsRecordingOrReplaying()) return;
     if (histogram_->Enabled()) StopInternal();
     LogEnd(timed_histogram()->counters()->isolate());
   }

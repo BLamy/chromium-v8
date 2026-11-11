@@ -3935,6 +3935,9 @@ MaybeDirectHandle<SharedFunctionInfo> CompileScriptOnMainThread(
               ->NewStringFromUtf8(base::Vector<const uint8_t>(
                   reinterpret_cast<const uint8_t*>(replaced), strlen(replaced)))
               .ToHandleChecked();
+      // Compiling it is the replay's own doing: none of what that asks the
+      // system is in the recording.
+      replayio::AutoDisallowEvents disallow("ReplaceSourceContents");
       UnoptimizedCompileState new_compile_state;
       ReusableUnoptimizedCompileState new_reusable_state(isolate);
       ParseInfo new_parse_info(isolate, flags, &new_compile_state,
