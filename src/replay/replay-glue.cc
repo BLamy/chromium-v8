@@ -20,6 +20,7 @@
 #include "src/debug/debug-interface.h"
 #include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
+#include "src/inspector/v8-inspector-impl.h"
 #include "src/replay/replay-glue-js.h"
 #include "src/inspector/protocol/Runtime.h"
 #include "src/replay/replay-internal.h"
@@ -95,7 +96,16 @@ struct IsolateGlue {
   // The inspector made here, unless the embedder had already made one.
   std::unique_ptr<v8_inspector::V8Inspector> own_inspector;
   v8_inspector::V8Inspector* inspector = nullptr;
+  // The session of the context group the glue is made with, which is the
+  // only one there is outside a browser.
   std::unique_ptr<v8_inspector::V8InspectorSession> session;
+  // Blink gives every local frame root a context group of its own, and a
+  // session only sees its group's contexts. A page navigated to after the
+  // renderer started is in a later group than the first, so there's a session
+  // for each group that's been asked about, as in Replay's Chromium 108.
+  std::map<int, std::unique_ptr<v8_inspector::V8InspectorSession>> group_sessions;
+  // The group the command being answered is about.
+  int current_group = kContextGroupId;
   v8::Global<v8::Context> context;
   v8::Global<v8::Function> command_callback;
   v8::Global<v8::Function> clear_pause_data_callback;
@@ -114,6 +124,41 @@ void RegisterContext(IsolateGlue* glue, v8::Local<v8::Context> context) {
                                sizeof(kName) - 1)));
 }
 
+// The context group the inspector has a context in, or the glue's own for a
+// context it hasn't been told about.
+int GroupOf(IsolateGlue* glue, v8::Local<v8::Context> context) {
+  if (context.IsEmpty()) return kContextGroupId;
+  int id = v8::debug::GetContextId(context);
+  if (!id) return kContextGroupId;
+  int group = static_cast<v8_inspector::V8InspectorImpl*>(glue->inspector)
+                  ->contextGroupId(id);
+  return group ? group : kContextGroupId;
+}
+
+// The replay's session in a context group, made when the group is first
+// asked about, with the domains the glue's script enabled in the first.
+v8_inspector::V8InspectorSession* SessionFor(IsolateGlue* glue, int group) {
+  if (group == kContextGroupId) return glue->session.get();
+  auto iter = glue->group_sessions.find(group);
+  if (iter != glue->group_sessions.end()) return iter->second.get();
+  std::unique_ptr<v8_inspector::V8InspectorSession> session =
+      glue->inspector->connect(
+          group, &glue->channel, v8_inspector::StringView(),
+          v8_inspector::V8Inspector::kFullyTrusted,
+          v8_inspector::V8Inspector::kNotWaitingForDebugger);
+  recordreplay::AddReplayOwnedInspectorSession(session.get());
+  for (const char* message :
+       {"{\"id\":1,\"method\":\"Runtime.enable\"}",
+        "{\"id\":2,\"method\":\"Debugger.enable\"}"}) {
+    session->dispatchProtocolMessage(v8_inspector::StringView(
+        reinterpret_cast<const uint8_t*>(message), strlen(message)));
+    glue->channel.TakeResponse();
+  }
+  v8_inspector::V8InspectorSession* raw = session.get();
+  glue->group_sessions[group] = std::move(session);
+  return raw;
+}
+
 void NativeLog(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::String::Utf8Value text(info.GetIsolate(), info[0]);
   recordreplay::Print("%s", *text ? *text : "");
@@ -123,8 +168,9 @@ void NativeSendCDPMessage(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::Isolate* isolate = info.GetIsolate();
   IsolateGlue* glue = (*gGlue)[isolate];
   v8::String::Utf8Value message(isolate, info[0]);
-  glue->session->dispatchProtocolMessage(v8_inspector::StringView(
-      reinterpret_cast<const uint8_t*>(*message), message.length()));
+  SessionFor(glue, glue->current_group)
+      ->dispatchProtocolMessage(v8_inspector::StringView(
+          reinterpret_cast<const uint8_t*>(*message), message.length()));
   info.GetReturnValue().Set(ToV8String(isolate, glue->channel.TakeResponse()));
 }
 
@@ -204,7 +250,7 @@ void NativeCurrentConsoleCall(const v8::FunctionCallbackInfo<v8::Value>& info) {
     for (int i = 1; i < args.length(); i++) {
       if (i != 1) json += ",";
       static const char kGroup[] = "replay";
-      auto remote = glue->session->wrapObject(
+      auto remote = SessionFor(glue, GroupOf(glue, context))->wrapObject(
           context, v8::Utils::ToLocal(args.at(i)),
           v8_inspector::StringView(reinterpret_cast<const uint8_t*>(kGroup),
                                    sizeof(kGroup) - 1),
@@ -254,7 +300,7 @@ void NativeWrapValue(const v8::FunctionCallbackInfo<v8::Value>& info) {
   }
   RegisterContext(glue, context);
   static const char kGroup[] = "replay";
-  auto remote = glue->session->wrapObject(
+  auto remote = SessionFor(glue, GroupOf(glue, context))->wrapObject(
       context, value,
       v8_inspector::StringView(reinterpret_cast<const uint8_t*>(kGroup),
                                sizeof(kGroup) - 1),
@@ -277,12 +323,26 @@ void NativeUnwrapObject(const v8::FunctionCallbackInfo<v8::Value>& info) {
   std::unique_ptr<v8_inspector::StringBuffer> error;
   v8::Local<v8::Value> value;
   v8::Local<v8::Context> context;
-  if (*id && glue->session->unwrapObject(
-                 &error,
-                 v8_inspector::StringView(
-                     reinterpret_cast<const uint8_t*>(*id), id.length()),
-                 &value, &context, nullptr)) {
+  if (!*id) return;
+  v8_inspector::StringView view(reinterpret_cast<const uint8_t*>(*id),
+                                id.length());
+  // An ID is its session's, and the group being asked about is the likeliest.
+  if (SessionFor(glue, glue->current_group)
+          ->unwrapObject(&error, view, &value, &context, nullptr)) {
     info.GetReturnValue().Set(value);
+    return;
+  }
+  if (glue->current_group != kContextGroupId &&
+      glue->session->unwrapObject(&error, view, &value, &context, nullptr)) {
+    info.GetReturnValue().Set(value);
+    return;
+  }
+  for (auto& entry : glue->group_sessions) {
+    if (entry.first == glue->current_group) continue;
+    if (entry.second->unwrapObject(&error, view, &value, &context, nullptr)) {
+      info.GetReturnValue().Set(value);
+      return;
+    }
   }
 }
 
@@ -384,12 +444,41 @@ void RegisterStackContexts(Isolate* isolate, IsolateGlue* glue) {
   for (v8::Local<v8::Context> context : contexts) RegisterContext(glue, context);
 }
 
+// The context group a command is about: the one the innermost script on the
+// stack runs in, which is where the replay is stopped. With no script on the
+// stack it's the group of the page the embedder answers commands for.
+int CurrentGroup(Isolate* isolate, IsolateGlue* glue) {
+  v8::Isolate* v8_isolate = reinterpret_cast<v8::Isolate*>(isolate);
+  v8::Local<v8::Context> own = glue->context.Get(v8_isolate);
+  for (JavaScriptStackFrameIterator it(isolate); !it.done(); it.Advance()) {
+    Tagged<JSFunction> function = it.frame()->function();
+    if (!IsScript(function->shared()->script())) continue;
+    DirectHandle<NativeContext> native(function->native_context(), isolate);
+    v8::Local<v8::Context> context = v8::Utils::ToLocal(native);
+    if (context == own) continue;
+    return GroupOf(glue, context);
+  }
+  if (gPageCommandHandlers) {
+    auto iter = gPageCommandHandlers->find(v8_isolate);
+    if (iter != gPageCommandHandlers->end() && !iter->second.context.IsEmpty()) {
+      return GroupOf(glue, iter->second.context.Get(v8_isolate));
+    }
+  }
+  return kContextGroupId;
+}
+
 }  // namespace
 
 v8_inspector::V8InspectorSession* RecordReplayGlueSession(
     v8::Isolate* isolate) {
   v8::HandleScope handles(isolate);
   return EnsureGlue(isolate)->session.get();
+}
+
+v8_inspector::V8InspectorSession* RecordReplayGlueSessionForGroup(
+    v8::Isolate* isolate, int group) {
+  v8::HandleScope handles(isolate);
+  return SessionFor(EnsureGlue(isolate), group > 0 ? group : kContextGroupId);
 }
 
 void RecordReplaySetGlueNativesInstaller(
@@ -409,6 +498,7 @@ std::string RecordReplayRunGlueCommand(Isolate* i_isolate, const char* command,
     return "{\"error\":\"Command callback not installed\"}";
   }
   RegisterStackContexts(i_isolate, glue);
+  glue->current_group = CurrentGroup(i_isolate, glue);
 
   // In the cloud each pause gets a process of its own, and the engine only clears pause
   // data around console messages. Here one replay stops at thousands of points, and
@@ -830,6 +920,13 @@ extern "C" V8_EXPORT void V8RecordReplaySetGlueNativesInstaller(
 extern "C" V8_EXPORT v8_inspector::V8InspectorSession*
 V8RecordReplayGlueSession(v8::Isolate* isolate) {
   return v8::internal::RecordReplayGlueSession(isolate);
+}
+
+// The replay's session in one context group. Blink's agents for a frame are
+// given its root's.
+extern "C" V8_EXPORT v8_inspector::V8InspectorSession*
+V8RecordReplayGlueSessionForGroup(v8::Isolate* isolate, int group) {
+  return v8::internal::RecordReplayGlueSessionForGroup(isolate, group);
 }
 
 extern "C" V8_EXPORT void V8RecordReplaySetNewScriptCallback(
