@@ -15,6 +15,8 @@
 #include "src/heap/mutable-page.h"
 #include "src/tasks/cancelable-task.h"
 
+#include "src/replay/replay.h"
+
 namespace v8::internal {
 
 PooledPage::PooledPage(void* uninitialized_metadata, VirtualMemory reservation,
@@ -518,6 +520,10 @@ void MemoryPool::PostDelayedReleaseTaskIfNeeded(Isolate* isolate) {
   static constexpr base::TimeDelta kTimeSlack = base::TimeDelta::FromSeconds(4);
   const size_t pool_timeout = config_.timeout_in_sec;
   if (pool_timeout == 0 || task_disabled_.load()) return;
+  // This is reached from a garbage collection, where nothing can be recorded,
+  // and when the task ran would be no part of a recording either. Pooled pages
+  // are still reused, and released when the pool is torn down.
+  if (recordreplay::IsRecordingOrReplaying()) return;
 
   const base::TimeDelta delta =
       base::TimeDelta::FromSeconds(pool_timeout) + kTimeSlack;
