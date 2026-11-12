@@ -37,6 +37,9 @@ void RecordReplayOnConsoleMessage(size_t bookmark);
 V8_EXPORT_PRIVATE size_t RecordReplayNewBookmark();
 void RecordReplayOnExceptionUnwindRaw();
 void RecordReplayOnTargetProgressReached();
+// Asks the driver, when recording on the main thread, to call back the next
+// time the progress counter advances: a point a replay reaches too.
+void RecordReplayTriggerProgressInterrupt();
 void RecordReplayInstrument(const char* kind, const char* function,
                             int function_index);
 void RecordReplayAddPossibleBreakpoint(int line, int column,

@@ -2603,12 +2603,31 @@ void Isolate::CancelTerminateExecution() {
 }
 
 void Isolate::RequestInterrupt(InterruptCallback callback, void* data) {
-  ExecutionAccess access(this);
-  api_interrupts_queue_.push(InterruptEntry(callback, data));
-  stack_guard()->RequestApiInterrupt();
+  recordreplay::OrderedLock(record_replay_api_interrupts_ordered_lock_id_);
+  {
+    ExecutionAccess access(this);
+    api_interrupts_queue_.push(InterruptEntry(callback, data));
+    stack_guard()->RequestApiInterrupt();
+  }
+  recordreplay::OrderedUnlock(record_replay_api_interrupts_ordered_lock_id_);
 }
 
 void Isolate::InvokeApiInterruptCallbacks() {
+  if (recordreplay::IsRecordingOrReplaying()) {
+    // When recording, we can't invoke API interrupt callbacks at arbitrary
+    // points where we check for interrupts, as we won't be able to invoke those
+    // callbacks at the same point when replaying. Instead, after detecting that
+    // interrupts have been added to the queue we trigger an interrupt the next
+    // time the progress counter advances, and will invoke the callbacks then.
+    if (recordreplay::IsRecording() && recordreplay::IsMainThread()) {
+      ExecutionAccess access(this);
+      if (!api_interrupts_queue_.empty()) {
+        RecordReplayTriggerProgressInterrupt();
+      }
+    }
+    return;
+  }
+
   RCS_SCOPE(this, RuntimeCallCounterId::kInvokeApiInterruptCallbacks);
   struct ApiInterruptScope {
     explicit ApiInterruptScope(Isolate* isolate) : isolate_(isolate) {
@@ -2643,6 +2662,61 @@ void Isolate::InvokeApiInterruptCallbacks() {
 #endif  // V8_DISALLOW_JS_IN_API_INTERRUPTS_IS_CHECKED
     entry.first(reinterpret_cast<v8::Isolate*>(this), entry.second);
   }
+}
+
+void Isolate::RecordReplayInvokeApiInterruptCallbacksAtProgress() {
+  CHECK(recordreplay::IsRecordingOrReplaying());
+  CHECK(recordreplay::IsMainThread());
+
+  // A callback that advances progress without running JS (an inspector
+  // command's response adds a bookmark) reaches the progress interrupt
+  // requested for callbacks queued meanwhile. Running them there would nest
+  // every queued callback inside the previous one, thousands deep for a burst
+  // of DevTools commands, until C stack limit checks (e.g. in RegExp parsing)
+  // fail at a depth that differs between recording and replaying. The
+  // outermost invocation's loop runs them instead. JS entered from a callback
+  // (e.g. an evaluation in a debugger pause the callback started) still runs
+  // them, so they can interrupt that JS: the enclosing invocation's topmost JS
+  // frame stays on the stack, so a different topmost fp means newer JS frames.
+  Address js_fp = kNullAddress;
+  {
+    JavaScriptStackFrameIterator it(this);
+    if (!it.done()) js_fp = it.frame()->fp();
+  }
+  if (record_replay_invoking_api_interrupts_ &&
+      record_replay_api_interrupts_js_fp_ == js_fp) {
+    // The interrupt that got us here is used up. Request it again so JS the
+    // enclosing callback runs next still requests a progress interrupt for
+    // whatever is queued, instead of waiting for the callback to return.
+    stack_guard()->RequestApiInterrupt();
+    return;
+  }
+  bool was_invoking = record_replay_invoking_api_interrupts_;
+  Address previous_js_fp = record_replay_api_interrupts_js_fp_;
+  record_replay_invoking_api_interrupts_ = true;
+  record_replay_api_interrupts_js_fp_ = js_fp;
+
+  while (true) {
+    InterruptEntry entry;
+    recordreplay::OrderedLock(record_replay_api_interrupts_ordered_lock_id_);
+    {
+      ExecutionAccess access(this);
+      if (api_interrupts_queue_.empty()) {
+        recordreplay::OrderedUnlock(
+            record_replay_api_interrupts_ordered_lock_id_);
+        break;
+      }
+      entry = api_interrupts_queue_.front();
+      api_interrupts_queue_.pop();
+    }
+    recordreplay::OrderedUnlock(record_replay_api_interrupts_ordered_lock_id_);
+    VMState<EXTERNAL> state(this);
+    HandleScope handle_scope(this);
+    entry.first(reinterpret_cast<v8::Isolate*>(this), entry.second);
+  }
+
+  record_replay_invoking_api_interrupts_ = was_invoking;
+  record_replay_api_interrupts_js_fp_ = previous_js_fp;
 }
 
 void Isolate::RequestInvalidateNoProfilingProtector() {
@@ -6335,6 +6409,9 @@ bool Isolate::Init(SnapshotData* startup_snapshot_data,
   DCHECK(!heap_.HasBeenSetUp());
   heap_.SetUp(main_thread_local_heap());
   MicrotaskQueue::SetUpDefaultMicrotaskQueue(this);
+
+  record_replay_api_interrupts_ordered_lock_id_ =
+      recordreplay::CreateOrderedLock("APIInterrupts");
   InitializeIsShortBuiltinCallsEnabled();
   if (!create_heap_objects) {
     // Must be done before deserializing RO space, since RO space may contain

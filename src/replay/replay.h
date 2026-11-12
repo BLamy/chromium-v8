@@ -46,6 +46,12 @@ V8_EXPORT_PRIVATE bool AreEventsPassedThrough();
 V8_EXPORT_PRIVATE void BeginDisallowEvents(const char* label);
 V8_EXPORT_PRIVATE void EndDisallowEvents();
 
+// A lock threads take in the same order when replaying as when recording.
+// Zero, which locks nothing, in a process that's neither.
+V8_EXPORT_PRIVATE int CreateOrderedLock(const char* name);
+V8_EXPORT_PRIVATE void OrderedLock(int lock);
+V8_EXPORT_PRIVATE void OrderedUnlock(int lock);
+
 // A value or bytes that are the same when replaying as when recording.
 V8_EXPORT_PRIVATE uintptr_t RecordReplayValue(const char* why, uintptr_t value);
 V8_EXPORT_PRIVATE void RecordReplayBytes(const char* why, void* buf,

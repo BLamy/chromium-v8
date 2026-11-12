@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "src/execution/isolate.h"
 #include "src/flags/flags.h"
 #include "src/replay/replay-internal.h"
 
@@ -35,6 +36,10 @@ uintptr_t (*gValue)(const char* why, uintptr_t value);
 bool (*gAreEventsDisallowed)();
 bool (*gAreEventsPassedThrough)();
 void (*gProgressReached)();
+void (*gTriggerProgressInterrupt)();
+int (*gCreateOrderedLock)(const char* name);
+void (*gOrderedLock)(int lock);
+void (*gOrderedUnlock)(int lock);
 void (*gBeginDisallowEvents)();
 void (*gBeginDisallowEventsWithLabel)(const char* label);
 void (*gEndDisallowEvents)();
@@ -113,6 +118,11 @@ void SetRecordingOrReplaying(void* handle) {
   LoadSymbol(handle, "RecordReplayAreEventsPassedThrough",
              gAreEventsPassedThrough);
   LoadSymbol(handle, "RecordReplayProgressReached", gProgressReached);
+  LoadSymbol(handle, "RecordReplayTriggerProgressInterrupt",
+             gTriggerProgressInterrupt);
+  LoadSymbol(handle, "RecordReplayCreateOrderedLock", gCreateOrderedLock);
+  LoadSymbol(handle, "RecordReplayOrderedLock", gOrderedLock);
+  LoadSymbol(handle, "RecordReplayOrderedUnlock", gOrderedUnlock);
   LoadSymbol(handle, "RecordReplayBeginDisallowEvents", gBeginDisallowEvents);
   LoadSymbol(handle, "RecordReplayBeginDisallowEventsWithLabel",
              gBeginDisallowEventsWithLabel);
@@ -165,7 +175,13 @@ void SetRecordingOrReplaying(void* handle) {
   void (*set_progress_interrupt_callback)(void (*)());
   LoadSymbol(handle, "RecordReplaySetProgressInterruptCallback",
              set_progress_interrupt_callback);
-  set_progress_interrupt_callback([]() {});
+  // As in 108, except for the heap's part: what the memory reducer and the
+  // near-heap-limit callbacks ask for at a progress interrupt isn't ported.
+  set_progress_interrupt_callback([]() {
+    CHECK(recordreplay::IsMainThread());
+    internal::Isolate::Current()
+        ->RecordReplayInvokeApiInterruptCallbacksAtProgress();
+  });
 
   void (*set_track_objects_callback)(void (*)(bool));
   LoadSymbol(handle, "RecordReplaySetTrackObjectsCallback",
@@ -244,6 +260,18 @@ void BeginDisallowEvents(const char* label) {
 }
 
 void EndDisallowEvents() { gEndDisallowEvents(); }
+
+int CreateOrderedLock(const char* name) {
+  return IsRecordingOrReplaying() ? gCreateOrderedLock(name) : 0;
+}
+
+void OrderedLock(int lock) {
+  if (IsRecordingOrReplaying()) gOrderedLock(lock);
+}
+
+void OrderedUnlock(int lock) {
+  if (IsRecordingOrReplaying()) gOrderedUnlock(lock);
+}
 
 uintptr_t RecordReplayValue(const char* why, uintptr_t value) {
   return IsRecordingOrReplaying() ? gValue(why, value) : value;
@@ -330,6 +358,11 @@ void RecordReplayOnConsoleMessage(size_t bookmark) {
 }
 
 void RecordReplayOnExceptionUnwindRaw() { gOnExceptionUnwind(); }
+
+void RecordReplayTriggerProgressInterrupt() {
+  CHECK(recordreplay::IsRecording() && recordreplay::IsMainThread());
+  gTriggerProgressInterrupt();
+}
 
 void RecordReplayOnTargetProgressReached() {
   // Nothing is at a point the recording knows about while events are disallowed.

@@ -1142,6 +1142,8 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
   void RequestInterrupt(InterruptCallback callback, void* data);
   void InvokeApiInterruptCallbacks();
 
+  void RecordReplayInvokeApiInterruptCallbacksAtProgress();
+
   bool is_executing_api_interrupt() const { return api_interrupt_depth_ > 0; }
 
   void RequestInvalidateNoProfilingProtector();
@@ -2789,6 +2791,15 @@ class V8_EXPORT_PRIVATE Isolate final : private HiddenFactory {
 
   using InterruptEntry = std::pair<InterruptCallback, void*>;
   std::queue<InterruptEntry> api_interrupts_queue_;
+
+  // Lock to ensure consistent ordering of other threads adding API interrupts
+  // vs. the isolate's thread removing and running them.
+  int record_replay_api_interrupts_ordered_lock_id_ = 0;
+
+  // Set while RecordReplayInvokeApiInterruptCallbacksAtProgress runs
+  // callbacks, with the topmost JavaScript frame's fp when it started.
+  bool record_replay_invoking_api_interrupts_ = false;
+  Address record_replay_api_interrupts_js_fp_ = kNullAddress;
   int api_interrupt_depth_ = 0;
 
 #define GLOBAL_BACKING_STORE(type, name, initialvalue) type name##_;
