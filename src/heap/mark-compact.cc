@@ -89,6 +89,7 @@
 #include "src/objects/transitions-inl.h"
 #include "src/objects/visitors.h"
 #include "src/replay/replay.h"
+#include "src/replay/weak-refs.h"
 #include "src/sandbox/trusted-pointer-table.h"
 #include "src/sandbox/trusted-pointer-tag.h"
 #include "src/snapshot/shared-heap-serializer.h"
@@ -4251,6 +4252,7 @@ void MarkCompactCollector::ProcessJSWeakRefs(JobDelegate* delegate) {
             heap_, non_atomic_marking_state_, target)) {
       weak_ref->set_target(ReadOnlyRoots(isolate).undefined_value(),
                            SKIP_WRITE_BARRIER);
+      replayio::ReplayWeakRefs::OnTargetCleared(isolate, weak_ref);
     } else {
       // The value of the JSWeakRef is alive.
       ObjectSlot slot(&weak_ref->target_);
@@ -4269,6 +4271,9 @@ void MarkCompactCollector::ProcessJSWeakRefs(JobDelegate* delegate) {
     if (MarkingHelper::IsUnmarkedAndNotAlwaysLive(
             heap_, non_atomic_marking_state_, target)) {
       DCHECK(Object::CanBeHeldWeakly(target));
+      // When replaying, marking keeps the targets of tracked cells alive (see
+      // VisitWeakCell), so the GC never clears one.
+      DCHECK(!recordreplay::IsReplaying() || weak_cell->record_replay_id() == 0);
       // The value of the WeakCell is dead.
       Tagged<JSFinalizationRegistry> finalization_registry =
           Cast<JSFinalizationRegistry>(weak_cell->finalization_registry());

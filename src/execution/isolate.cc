@@ -114,6 +114,7 @@
 #include "src/profiler/tracing-cpu-profiler.h"
 #include "src/regexp/regexp-stack.h"
 #include "src/replay/replay-internal.h"
+#include "src/replay/replay-isolate-data.h"
 #include "src/roots/roots.h"
 #include "src/roots/static-roots.h"
 #include "src/sandbox/js-dispatch-table-inl.h"
@@ -4975,6 +4976,13 @@ Isolate::Isolate(IsolateGroup* isolate_group)
 #endif  // V8_ENABLE_WEBASSEMBLY
 }
 
+replayio::ReplayIsolateData* Isolate::EnsureReplayData() {
+  if (!replay_data_) {
+    replay_data_ = std::make_unique<replayio::ReplayIsolateData>();
+  }
+  return replay_data_.get();
+}
+
 void Isolate::CheckIsolateLayout() {
 #ifdef V8_ENABLE_SANDBOX
   static_assert(static_cast<int>(ExternalPointerTable::BaseOffset()) ==
@@ -5213,6 +5221,10 @@ void Isolate::Deinit() {
   // We start with the heap tear down so that releasing managed objects does
   // not cause a GC.
   heap_.StartTearDown();
+
+  // Holds v8::Globals, which have to be destroyed before the global handles,
+  // and is used by the GC, which can still run before the heap tear down.
+  replay_data_.reset();
 
   DisallowGarbageCollection no_gc;
   IgnoreLocalGCRequests ignore_gc_requests(heap());

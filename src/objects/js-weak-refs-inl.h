@@ -6,6 +6,7 @@
 #define V8_OBJECTS_JS_WEAK_REFS_INL_H_
 
 #include "src/objects/js-weak-refs.h"
+#include "src/replay/finalization-registry.h"
 // Include the non-inl header before the rest of the headers.
 
 #include "src/api/api-inl.h"
@@ -73,6 +74,21 @@ void JSFinalizationRegistry::set_next_dirty(
   next_dirty_.store(this, value, mode);
 }
 
+int JSFinalizationRegistry::record_replay_id() const {
+  Tagged<Object> id = record_replay_id_.load();
+  return IsSmi(id) ? Smi::ToInt(id) : 0;
+}
+void JSFinalizationRegistry::set_record_replay_id(int value) {
+  record_replay_id_.store(this, Smi::FromInt(value), SKIP_WRITE_BARRIER);
+}
+Tagged<Object> JSFinalizationRegistry::record_replay_cells() const {
+  return record_replay_cells_.load();
+}
+void JSFinalizationRegistry::set_record_replay_cells(Tagged<Object> value,
+                                                     WriteBarrierMode mode) {
+  record_replay_cells_.store(this, value, mode);
+}
+
 int JSFinalizationRegistry::flags() const { return flags_.load().value(); }
 void JSFinalizationRegistry::set_flags(int value) {
   flags_.store(this, Smi::FromInt(value));
@@ -80,6 +96,21 @@ void JSFinalizationRegistry::set_flags(int value) {
 
 BIT_FIELD_ACCESSORS(JSFinalizationRegistry, flags, scheduled_for_cleanup,
                     JSFinalizationRegistry::ScheduledForCleanupBit)
+
+int JSWeakRef::record_replay_id() const {
+  Tagged<Object> id = record_replay_id_.load();
+  return IsSmi(id) ? Smi::ToInt(id) : 0;
+}
+void JSWeakRef::set_record_replay_id(int value) {
+  record_replay_id_.store(this, Smi::FromInt(value), SKIP_WRITE_BARRIER);
+}
+
+int WeakCell::record_replay_id() const {
+  return record_replay_id_.load().value();
+}
+void WeakCell::set_record_replay_id(int value) {
+  record_replay_id_.store(this, Smi::FromInt(value));
+}
 
 Tagged<UnionOf<Symbol, JSReceiver, Undefined>> JSWeakRef::target() const {
   return target_.load();
@@ -173,6 +204,8 @@ bool JSFinalizationRegistry::RemoveUnregisterToken(
       switch (removal_mode) {
         case kRemoveMatchedCellsFromRegistry:
           weak_cell->RemoveFromFinalizationRegistryCells(isolate);
+          replayio::ReplayFinalizationRegistries::OnUnregisterCell(
+              isolate, Tagged(this), weak_cell);
           break;
         case kKeepMatchedCellsInRegistry:
           // Do nothing.
@@ -351,6 +384,31 @@ void WeakCell::Nullify(Isolate* isolate,
   fr->set_cleared_cells(Tagged(this), SKIP_WRITE_BARRIER_FOR_GC);
   gc_notify_updated_slot(
       fr, fr->RawField(offsetof(JSFinalizationRegistry, cleared_cells_)), this);
+}
+
+void WeakCell::RecordReplayNullify(Isolate* isolate) {
+  DCHECK(Object::CanBeHeldWeakly(target()));
+  Tagged<Undefined> undefined = ReadOnlyRoots(isolate).undefined_value();
+  set_target(undefined, SKIP_WRITE_BARRIER);
+
+  // From the registry's active list to the head of its cleared list.
+  Tagged<JSFinalizationRegistry> fr =
+      Cast<JSFinalizationRegistry>(finalization_registry());
+  if (IsWeakCell(prev())) {
+    Cast<WeakCell>(prev())->set_next(next());
+  } else {
+    fr->set_active_cells(next());
+  }
+  if (IsWeakCell(next())) {
+    Cast<WeakCell>(next())->set_prev(prev());
+  }
+  set_prev(undefined, SKIP_WRITE_BARRIER);
+  Tagged<UnionOf<Undefined, WeakCell>> cleared_head = fr->cleared_cells();
+  if (IsWeakCell(cleared_head)) {
+    Cast<WeakCell>(cleared_head)->set_prev(Tagged(this));
+  }
+  set_next(cleared_head);
+  fr->set_cleared_cells(Tagged(this));
 }
 
 void WeakCell::RemoveFromFinalizationRegistryCells(Isolate* isolate) {

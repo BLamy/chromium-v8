@@ -9,6 +9,12 @@ namespace runtime {
 extern runtime JSWeakRefAddToKeptObjects(
     implicit context: Context)(JSReceiver|Symbol): void;
 
+extern runtime RecordReplayWeakRefConstruct(
+    implicit context: Context)(JSWeakRef): void;
+
+extern runtime RecordReplayWeakRefDeref(
+    implicit context: Context)(JSWeakRef): JSAny;
+
 }  // namespace runtime
 
 namespace weakref {
@@ -46,6 +52,8 @@ transitioning javascript builtin WeakRefConstructor(
   weakRef.target = weakTarget;
   // 4. Perfom ! AddToKeptObjects(target).
   runtime::JSWeakRefAddToKeptObjects(weakTarget);
+  // Record/replay: gives the WeakRef its ID (zero when it isn't tracked).
+  runtime::RecordReplayWeakRefConstruct(weakRef);
   // 6. Return weakRef.
   return weakRef;
 }
@@ -59,7 +67,8 @@ transitioning javascript builtin WeakRefDeref(
       MessageTemplate::kIncompatibleMethodReceiver, 'WeakRef.prototype.deref',
       receiver);
   // 3. Let target be the value of weakRef.[[WeakRefTarget]].
-  const target = weakRef.target;
+  // Record/replay: the answer is the recording's.
+  const target = runtime::RecordReplayWeakRefDeref(weakRef);
   // 4. If target is not empty,
   //   a. Perform ! AddToKeptObjects(target).
   //   b. Return target.

@@ -43,6 +43,14 @@ V8_EXPORT_PRIVATE bool IsMainThread();
 V8_EXPORT_PRIVATE bool HasDivergedFromRecording();
 V8_EXPORT_PRIVATE bool AreEventsDisallowed();
 V8_EXPORT_PRIVATE bool AreEventsPassedThrough();
+// Whether this point is one a replay reaches too, so that a value can be
+// recorded here and IDs handed out the same on both sides.
+V8_EXPORT_PRIVATE bool AreEventsAvailable();
+// Whether the process is recording or replaying with a feature of the driver
+// on. A driver that can't say has every feature on.
+V8_EXPORT_PRIVATE bool FeatureEnabled(const char* feature);
+// Checked when replaying against what the recording had here.
+V8_EXPORT_PRIVATE void Assert(const char* format, ...);
 V8_EXPORT_PRIVATE void BeginDisallowEvents(const char* label);
 V8_EXPORT_PRIVATE void EndDisallowEvents();
 

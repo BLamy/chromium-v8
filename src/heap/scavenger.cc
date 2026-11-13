@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "absl/container/flat_hash_set.h"
+#include "src/replay/replay.h"
 #include "src/base/utils/random-number-generator.h"
 #include "src/common/globals.h"
 #include "src/execution/isolate-inl.h"
@@ -1655,7 +1656,11 @@ void ScavengerCollector::CollectGarbage() {
       stack_scan_mode != Heap::StackScanMode::kNone && heap_->IsGCWithStack();
   const bool is_using_precise_pinning =
       heap_->ShouldUsePrecisePinningForMinorGC();
+  // A recording describes what the full collector cleared (src/replay/
+  // gc-poll.h), so a recorded or replaying process leaves WeakRefs and
+  // FinalizationRegistry cells to it.
   const bool should_handle_weak_objects_weakly =
+      !recordreplay::IsRecordingOrReplaying() &&
       v8_flags.handle_weak_ref_weakly_in_minor_gc &&
       !is_using_conservative_stack_scanning && !is_using_precise_pinning;
 

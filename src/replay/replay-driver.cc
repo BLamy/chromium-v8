@@ -45,6 +45,9 @@ void (*gBeginDisallowEventsWithLabel)(const char* label);
 void (*gEndDisallowEvents)();
 bool (*gIsReplaying)();
 bool (*gHasDivergedFromRecording)();
+// Not in every driver, so these two may be null.
+void (*gAssert)(const char* format, va_list args);
+bool (*gFeatureEnabled)(const char* feature, const char* subfeature);
 const char* (*gReplaceSourceContents)(const char* contents);
 size_t (*gNewBookmark)();
 void (*gOnAnnotation)(const char* kind, const char* contents);
@@ -137,6 +140,10 @@ void SetRecordingOrReplaying(void* handle) {
 
   LoadSymbol(handle, "RecordReplayNewBookmark", gNewBookmark);
   LoadSymbol(handle, "RecordReplayOnAnnotation", gOnAnnotation);
+  gAssert = reinterpret_cast<decltype(gAssert)>(
+      dlsym(handle, "RecordReplayAssert"));
+  gFeatureEnabled = reinterpret_cast<decltype(gFeatureEnabled)>(
+      dlsym(handle, "RecordReplayFeatureEnabled"));
 
   gMainThread = pthread_self();
   recordreplay::gIsRecordingOrReplaying = true;
@@ -271,6 +278,24 @@ void OrderedLock(int lock) {
 
 void OrderedUnlock(int lock) {
   if (IsRecordingOrReplaying()) gOrderedUnlock(lock);
+}
+
+bool AreEventsAvailable() {
+  return !AreEventsDisallowed() && !AreEventsPassedThrough() &&
+         !HasDivergedFromRecording();
+}
+
+bool FeatureEnabled(const char* feature) {
+  if (!IsRecordingOrReplaying()) return false;
+  return !gFeatureEnabled || gFeatureEnabled(feature, nullptr);
+}
+
+void Assert(const char* format, ...) {
+  if (!IsRecordingOrReplaying() || !gAssert) return;
+  va_list args;
+  va_start(args, format);
+  gAssert(format, args);
+  va_end(args);
 }
 
 uintptr_t RecordReplayValue(const char* why, uintptr_t value) {
