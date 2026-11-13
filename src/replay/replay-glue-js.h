@@ -227,7 +227,12 @@ function createProtocolObject(objectId, level) {
     preview = new ProtocolObjectPreview(obj, level).fill();
   }
 
-  return { objectId, className, preview };
+  // As Replay's Chromium 108 gives it: the object's persistent ID when it has
+  // one, as a string. Reading it never makes one.
+  const persistent = rr.persistentId(rr.unwrapObject(obj.objectId));
+  const persistentId = persistent ? String(persistent) : undefined;
+
+  return { objectId, persistentId, className, preview };
 }
 
 // Target limit for the number of items (properties etc.) to include in object

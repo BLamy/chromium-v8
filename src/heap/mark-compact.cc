@@ -2262,11 +2262,18 @@ void MarkCompactCollector::MarkTransitiveClosureLinear() {
   marking_visitor_->SetKeyToValues(&key_to_values_);
 
   Ephemeron ephemeron;
+  const bool record_replay = recordreplay::IsRecordingOrReplaying();
+  size_t ephemerons_processed = 0;
   while (local_weak_objects()->next_ephemerons_local.Pop(&ephemeron)) {
     if (ApplyEphemeronSemantics(ephemeron.key, ephemeron.value) ==
         EphemeronResult::kUnresolved) {
       auto it = key_to_values_.try_emplace(ephemeron.key).first;
       it->second.push_back(ephemeron.value);
+    }
+
+    // This pass opens no GC scopes, and the ephemerons can number millions.
+    if (V8_UNLIKELY(record_replay && ++ephemerons_processed % 0x10000 == 0)) {
+      recordreplay::NotifyActivity();
     }
   }
 

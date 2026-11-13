@@ -315,6 +315,16 @@ void NativeWrapValue(const v8::FunctionCallbackInfo<v8::Value>& info) {
       std::string(reinterpret_cast<const char*>(text.data()), text.size())));
 }
 
+// An object's persistent ID, or zero when it has none. Never makes one: an ID
+// made at a pause would be made in one replay and not another.
+void NativePersistentId(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  int id = info.Length() && info[0]->IsObject()
+               ? RecordReplayObjectId(isolate, info[0], /* allow_create */ false)
+               : 0;
+  info.GetReturnValue().Set(v8::Integer::New(isolate, id));
+}
+
 // The value the inspector gave an object ID to.
 void NativeUnwrapObject(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::Isolate* isolate = info.GetIsolate();
@@ -398,6 +408,7 @@ IsolateGlue* EnsureGlue(v8::Isolate* isolate) {
   AddNative(isolate, context, rr, "hasReturnValue", NativeHasReturnValue);
   AddNative(isolate, context, rr, "returnValue", NativeReturnValue);
   AddNative(isolate, context, rr, "unwrapObject", NativeUnwrapObject);
+  AddNative(isolate, context, rr, "persistentId", NativePersistentId);
   if (gGlueNativesInstaller) gGlueNativesInstaller(isolate, context, rr);
 
   v8::TryCatch try_catch(isolate);

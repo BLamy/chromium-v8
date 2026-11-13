@@ -998,6 +998,13 @@ void V8RuntimeAgentImpl::addBinding(InspectedContext* context,
   }
   v8::HandleScope handles(m_inspector->isolate());
   v8::Local<v8::Context> localContext = context->context();
+  // [crash-0043] From Replay's V8 10.8: the context can be gone.
+  if (localContext.IsEmpty()) {
+    v8::recordreplay::Print(
+        "[crash-0043] V8RuntimeAgentImpl::addBinding empty context %d",
+        context->contextId());
+    return;
+  }
   v8::Local<v8::Object> global = localContext->Global();
   v8::Local<v8::String> v8Name = toV8String(m_inspector->isolate(), name);
   v8::Local<v8::Value> functionValue;

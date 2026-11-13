@@ -4538,8 +4538,24 @@ char* Isolate::RestoreThread(char* from) {
   return from + sizeof(ThreadLocalTop);
 }
 
+namespace {
+// The number of registered destructors is only the same when replaying if
+// ManagedObjectFinalizerSecondPass leaves unregistering to
+// Isolate::ReleaseSharedPtrs. Otherwise it depends on when the GC runs.
+bool ManagedPtrDestructorCountIsDeterministic() {
+  return recordreplay::IsRecordingOrReplaying() &&
+         recordreplay::FeatureEnabled("leak-references");
+}
+}  // namespace
+
 void Isolate::ReleaseSharedPtrs() {
   base::MutexGuard lock(&managed_ptr_destructors_mutex_);
+
+  if (ManagedPtrDestructorCountIsDeterministic()) {
+    recordreplay::Assert("Isolate::ReleaseSharedPtrs %zu",
+                         managed_ptr_destructors_count_);
+  }
+  managed_ptr_destructors_count_ = 0;
 
   auto delete_pointers = [this](ManagedPtrDestructor** list) {
     while (*list) {
@@ -4588,6 +4604,13 @@ void Isolate::RegisterManagedPtrDestructor(ManagedPtrDestructor* destructor) {
   }
   destructor->next_ = *list;
   *list = destructor;
+  if (!destructor->shared_) {
+    managed_ptr_destructors_count_++;
+    if (ManagedPtrDestructorCountIsDeterministic()) {
+      recordreplay::Assert("Isolate::RegisterManagedPtrDestructor %zu",
+                           managed_ptr_destructors_count_);
+    }
+  }
 }
 
 void Isolate::UnregisterManagedPtrDestructor(ManagedPtrDestructor* destructor) {
@@ -4607,6 +4630,10 @@ void Isolate::UnregisterManagedPtrDestructor(ManagedPtrDestructor* destructor) {
     *list = destructor->next_;
   }
   if (destructor->next_) destructor->next_->prev_ = destructor->prev_;
+  if (!destructor->shared_) {
+    DCHECK_GT(managed_ptr_destructors_count_, 0u);
+    managed_ptr_destructors_count_--;
+  }
   destructor->prev_ = nullptr;
   destructor->next_ = nullptr;
 }

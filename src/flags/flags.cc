@@ -27,6 +27,7 @@
 #include "src/codegen/cpu-features.h"
 #include "src/flags/flags-impl.h"
 #include "src/logging/tracing-flags.h"
+#include "src/replay/replay.h"
 #include "src/tracing/tracing-category-observer.h"
 #include "src/utils/allocation.h"
 #include "src/utils/memcopy.h"
@@ -1568,6 +1569,14 @@ void FlagList::EnforceFlagImplications() {
 uint32_t FlagList::Hash() {
   if (uint32_t hash = flag_hash.load(std::memory_order_relaxed)) return hash;
   uint32_t hash = ComputeFlagListHash();
+  // The hash goes into code cache keys and is compared with what an embedder
+  // stored, so a replay uses the recording's.
+  if (recordreplay::IsRecordingOrReplaying() && recordreplay::IsMainThread() &&
+      !recordreplay::AreEventsDisallowed() &&
+      !recordreplay::AreEventsPassedThrough()) {
+    hash = static_cast<uint32_t>(
+        recordreplay::RecordReplayValue("FlagList::Hash", hash));
+  }
   flag_hash.store(hash, std::memory_order_relaxed);
   return hash;
 }

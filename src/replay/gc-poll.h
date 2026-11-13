@@ -5,7 +5,10 @@
 #ifndef V8_REPLAY_GC_POLL_H_
 #define V8_REPLAY_GC_POLL_H_
 
+#include "include/v8config.h"
+
 namespace v8 {
+class Isolate;
 namespace internal {
 class Isolate;
 }  // namespace internal
@@ -35,6 +38,14 @@ class ReplayGCPollParticipant {
   // V8's own work. Must not add or remove participants.
   virtual void Poll() = 0;
 };
+
+// For an embedder with weak things of its own whose clearing its program can
+// see. Participants are polled in the order they were added, and can't be
+// added or removed during a poll.
+V8_EXPORT void AddReplayGCPollParticipant(Isolate* isolate,
+                                          ReplayGCPollParticipant* participant);
+V8_EXPORT void RemoveReplayGCPollParticipant(
+    Isolate* isolate, ReplayGCPollParticipant* participant);
 
 class ReplayGCPoll {
  public:

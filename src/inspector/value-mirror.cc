@@ -379,6 +379,12 @@ String16 descriptionForError(v8::Local<v8::Context> context,
   v8::TryCatch tryCatch(isolate);
 
   String16 name = toProtocolString(isolate, object->GetConstructorName());
+
+  // Get("stack"|"message") can run user accessors via Execution::Call.
+  if (v8::recordreplay::AreEventsDisallowed() &&
+      !v8::recordreplay::HasDivergedFromRecording()) {
+    return name + " (Divergent message + stack retrieval skipped)";
+  }
   {
     v8::Local<v8::Value> nameValue;
     if (getErrorProperty(context, object, toV8String(isolate, "name"))

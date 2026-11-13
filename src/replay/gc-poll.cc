@@ -105,5 +105,26 @@ void ReplayGCPoll::Poll(i::Isolate* isolate) {
   data->set_is_gc_polling(false);
 }
 
+void AddReplayGCPollParticipant(Isolate* isolate,
+                                ReplayGCPollParticipant* participant) {
+  ReplayIsolateData* data =
+      reinterpret_cast<i::Isolate*>(isolate)->EnsureReplayData();
+  CHECK(!data->is_gc_polling());
+  data->gc_poll_participants().push_back(participant);
+}
+
+void RemoveReplayGCPollParticipant(Isolate* isolate,
+                                   ReplayGCPollParticipant* participant) {
+  ReplayIsolateData* data =
+      reinterpret_cast<i::Isolate*>(isolate)->replay_data();
+  if (!data) return;
+  CHECK(!data->is_gc_polling());
+  std::vector<ReplayGCPollParticipant*>& participants =
+      data->gc_poll_participants();
+  participants.erase(
+      std::remove(participants.begin(), participants.end(), participant),
+      participants.end());
+}
+
 }  // namespace replayio
 }  // namespace v8

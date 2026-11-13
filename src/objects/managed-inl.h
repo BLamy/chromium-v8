@@ -17,6 +17,7 @@
 #include "src/heap/factory.h"
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/objects/heap-object-field-inl.h"
+#include "src/replay/replay.h"
 
 namespace v8::internal {
 
@@ -26,6 +27,11 @@ namespace detail {
 template <typename CppType>
 void Destructor(void* ptr) {
   auto shared_ptr_ptr = reinterpret_cast<std::shared_ptr<CppType>*>(ptr);
+  // Not the shared pointer's use count: other isolates share the object
+  // (e.g. a wasm NativeModule shared with workers) and release their
+  // references on their own threads, which nothing orders with this one,
+  // so the count differs when replaying.
+  recordreplay::Assert("Managed::Destructor");
   delete shared_ptr_ptr;
 }
 }  // namespace detail

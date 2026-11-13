@@ -192,6 +192,21 @@ void V8::Initialize() {
 
   FlagList::EnforceFlagImplications();
 
+#if V8_ENABLE_WEBASSEMBLY
+  // A lazily compiled wasm function is compiled by whichever thread calls it
+  // first, and other threads sharing its native module then call the published
+  // code directly, so which thread compiles it depends on timing between them.
+  // Compile wasm modules eagerly when recording or replaying. Embedders set
+  // this flag after the recorder attaches (Chromium sets it from its
+  // WebAssemblyLazyCompilation feature, then applies --js-flags), so it is
+  // overridden here, after EnforceFlagImplications, as these assignments don't
+  // count as setting it. From Replay's V8 10.8, which also turns off lazy
+  // validation and compilation hints, flags 15.8 doesn't have.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    v8_flags.wasm_lazy_compilation = false;
+  }
+#endif  // V8_ENABLE_WEBASSEMBLY
+
   // Initialize the default FlagList::Hash.
   FlagList::Hash();
 
