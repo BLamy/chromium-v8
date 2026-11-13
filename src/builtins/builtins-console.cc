@@ -151,7 +151,11 @@ enum {
 };
 
 // Tells the driver about a call that shows something, with the level the protocol
-// gives it. Runs on both sides, as messages are points in the recording.
+// gives it. Runs on both sides, as messages are points in the recording. It
+// comes after the console's delegate has told the sessions of the message, as
+// in 108 (V8ConsoleMessageStorage::addMessage): a client the page was recorded
+// with has described the arguments by then, so an Error's stack is formatted
+// the way the page formats it when a replay previews it here.
 void RecordReplayOnConsoleCall(Isolate* isolate,
                                const internal::BuiltinArguments& args,
                                const char* method) {
@@ -222,9 +226,9 @@ void LogTimerEvent(Isolate* isolate, BuiltinArguments args,
 
 #define CONSOLE_BUILTIN_IMPLEMENTATION(call, name)             \
   BUILTIN(Console##call) {                                     \
-    RecordReplayOnConsoleCall(isolate, args, #call);           \
     ConsoleCall(isolate, args, &debug::ConsoleDelegate::call); \
     RETURN_FAILURE_IF_EXCEPTION(isolate);                      \
+    RecordReplayOnConsoleCall(isolate, args, #call);           \
     return ReadOnlyRoots(isolate).undefined_value();           \
   }
 CONSOLE_METHOD_LIST(CONSOLE_BUILTIN_IMPLEMENTATION)
@@ -235,9 +239,9 @@ CONSOLE_METHOD_LIST(CONSOLE_BUILTIN_IMPLEMENTATION)
     if (!Formatter(isolate, args, index)) {                    \
       return ReadOnlyRoots(isolate).exception();               \
     }                                                          \
-    RecordReplayOnConsoleCall(isolate, args, #call);           \
     ConsoleCall(isolate, args, &debug::ConsoleDelegate::call); \
     RETURN_FAILURE_IF_EXCEPTION(isolate);                      \
+    RecordReplayOnConsoleCall(isolate, args, #call);           \
     return ReadOnlyRoots(isolate).undefined_value();           \
   }
 CONSOLE_METHOD_WITH_FORMATTER_LIST(CONSOLE_BUILTIN_IMPLEMENTATION)

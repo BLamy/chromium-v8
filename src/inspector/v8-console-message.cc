@@ -22,6 +22,7 @@
 #include "src/inspector/v8-stack-trace-impl.h"
 #include "src/inspector/value-mirror.h"
 #include "src/tracing/trace-event.h"
+#include "src/replay/replay.h"
 
 namespace v8_inspector {
 
@@ -609,6 +610,16 @@ void V8ConsoleMessageStorage::addMessage(
 
   inspector->forEachSession(
       contextGroupId, [&message](V8InspectorSessionImpl* session) {
+        // A replay's own session has the Runtime domain on, and reporting a
+        // console call to it would describe and preview the arguments again,
+        // which runs the page's getters and toString()s where the recording
+        // ran none. A replay gets the call from RecordReplayOnConsoleMessage
+        // instead (builtins-console.cc), with events disallowed.
+        if (message->origin() == V8MessageOrigin::kConsole &&
+            v8::recordreplay::IsRecordingOrReplaying() &&
+            v8::recordreplay::IsReplayOwnedInspectorSession(session)) {
+          return;
+        }
         if (message->origin() == V8MessageOrigin::kConsole) {
           session->consoleAgent()->messageAdded(message.get());
         }

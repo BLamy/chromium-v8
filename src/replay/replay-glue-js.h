@@ -359,7 +359,9 @@ ProtocolObjectPreview.prototype = {
       if (prop.name == "__proto__") {
         prototype = prop;
       } else {
-        const protocolProperty = createProtocolPropertyDescriptor(prop);
+        const protocolProperty = createProtocolPropertyDescriptor(
+          previewer === ErrorProperties ? errorStackAsValue(this.obj.objectId, prop) : prop
+        );
         const force = requiredProperties.includes(prop.name);
         this.addProperty(protocolProperty, force);
       }
@@ -470,7 +472,31 @@ function previewDate() {
 }
 
 function previewError() {
-  this.addProperty({ name: "name", value: this.obj.className }, /* force */ true);
+  // A getter's value, as in Replay's Chromium 108: an Error has no name of its
+  // own.
+  this.extra.getterValues = [
+    ...(this.extra.getterValues || []),
+    { name: "name", value: this.obj.className },
+  ];
+}
+
+// An Error's own stack accessor, as the data property it was in V8 10.8, when
+// the stack has been formatted. See errorFormattedStack in replay-glue.cc.
+function errorStackAsValue(objectId, prop) {
+  if (prop.name != "stack" || prop.value || !prop.get || !rr.errorFormattedStack) {
+    return prop;
+  }
+  const stack = rr.errorFormattedStack(rr.unwrapObject(objectId));
+  if (typeof stack != "string") {
+    return prop;
+  }
+  return {
+    name: "stack",
+    value: { type: "string", value: stack },
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  };
 }
 
 const ErrorProperties = [

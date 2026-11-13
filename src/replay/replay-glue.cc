@@ -21,6 +21,8 @@
 #include "src/execution/execution.h"
 #include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
+#include "src/execution/messages.h"
+#include "src/objects/debug-objects-inl.h"
 #include "src/inspector/v8-inspector-impl.h"
 #include "src/replay/replay-glue-js.h"
 #include "src/inspector/protocol/Runtime.h"
@@ -357,6 +359,51 @@ void NativeUnwrapObject(const v8::FunctionCallbackInfo<v8::Value>& info) {
   }
 }
 
+// An Error's stack as text, if it has been formatted and the Error still has
+// the stack accessor it was made with. In V8 10.8 a formatted stack was a data
+// property, which a preview shows as its value; since then it's an accessor
+// on each Error, which a preview would leave for the viewer to call. Nothing
+// of the page's runs here: an unformatted stack would be formatted by the
+// page's Error.prepareStackTrace, so that one stays an accessor.
+void NativeErrorFormattedStack(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  Isolate* i_isolate = reinterpret_cast<Isolate*>(isolate);
+  if (!info[0]->IsObject() || info[0]->IsProxy()) return;
+  v8::Local<v8::Object> object = info[0].As<v8::Object>();
+  DirectHandle<JSReceiver> receiver = Utils::OpenDirectHandle(*object);
+  if (!IsJSObject(*receiver) || IsAccessCheckNeeded(*receiver)) return;
+  v8::Local<v8::Context> context;
+  if (!object->GetCreationContext(isolate).ToLocal(&context)) return;
+  v8::Context::Scope context_scope(context);
+  v8::TryCatch try_catch(isolate);
+  v8::Local<v8::String> stack_name = ToV8String(isolate, "stack");
+  v8::Local<v8::String> get_name = ToV8String(isolate, "get");
+  v8::Local<v8::Value> fresh =
+      v8::Exception::Error(v8::String::Empty(isolate));
+  v8::Local<v8::Value> own_descriptor, fresh_descriptor, own_get, fresh_get;
+  if (!fresh->IsObject() ||
+      !object->GetOwnPropertyDescriptor(context, stack_name)
+           .ToLocal(&own_descriptor) ||
+      !fresh.As<v8::Object>()
+           ->GetOwnPropertyDescriptor(context, stack_name)
+           .ToLocal(&fresh_descriptor) ||
+      !own_descriptor->IsObject() || !fresh_descriptor->IsObject() ||
+      !own_descriptor.As<v8::Object>()->Get(context, get_name).ToLocal(&own_get) ||
+      !fresh_descriptor.As<v8::Object>()
+           ->Get(context, get_name)
+           .ToLocal(&fresh_get) ||
+      !own_get->IsFunction() || !own_get->StrictEquals(fresh_get)) {
+    return;
+  }
+  ErrorUtils::StackPropertyLookupResult lookup =
+      ErrorUtils::GetErrorStackProperty(i_isolate, receiver);
+  if (!IsErrorStackData(*lookup.error_stack)) return;
+  Tagged<ErrorStackData> data = Cast<ErrorStackData>(*lookup.error_stack);
+  if (!data->HasFormattedStack() || !IsString(data->formatted_stack())) return;
+  info.GetReturnValue().Set(Utils::ToLocal(
+      direct_handle(Cast<String>(data->formatted_stack()), i_isolate)));
+}
+
 // Gives the glue of an isolate the natives the embedder has for it.
 void (*gGlueNativesInstaller)(v8::Isolate* isolate,
                               v8::Local<v8::Context> context,
@@ -410,6 +457,8 @@ IsolateGlue* EnsureGlue(v8::Isolate* isolate) {
   AddNative(isolate, context, rr, "returnValue", NativeReturnValue);
   AddNative(isolate, context, rr, "unwrapObject", NativeUnwrapObject);
   AddNative(isolate, context, rr, "persistentId", NativePersistentId);
+  AddNative(isolate, context, rr, "errorFormattedStack",
+            NativeErrorFormattedStack);
   if (gGlueNativesInstaller) gGlueNativesInstaller(isolate, context, rr);
 
   v8::TryCatch try_catch(isolate);
