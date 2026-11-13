@@ -24,6 +24,7 @@
 #include "src/parsing/parse-info.h"
 #include "src/parsing/parsing.h"
 #include "src/replay/replay-internal.h"
+#include "src/replay/replay.h"
 #include "src/roots/roots.h"
 #include "src/sandbox/trusted-pointer-inl.h"
 #include "src/strings/string-builder-inl.h"
@@ -405,7 +406,16 @@ MaybeDirectHandle<JSAny> ErrorUtils::FormatStackTrace(
     }
   }
 
-  return builder.Finish();
+  MaybeDirectHandle<String> rv = builder.Finish();
+  DirectHandle<String> formatted;
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed() && rv.ToHandle(&formatted)) {
+    // [PRO-1150] Replay Error.stack
+    std::string str = formatted->ToStdString();
+    recordreplay::RecordReplayString("ErrorUtils::FormatStackTrace", str);
+    rv = isolate->factory()->NewStringFromUtf8(std::string_view(str));
+  }
+  return rv;
 }
 
 DirectHandle<String> MessageFormatter::Format(
@@ -433,7 +443,17 @@ DirectHandle<String> MessageFormatter::Format(
   // here to improve the efficiency of converting it to a C string and
   // other operations that are likely to take place (see GetLocalizedMessage
   // for example).
-  return String::Flatten(isolate, result_string);
+  DirectHandle<String> flat = String::Flatten(isolate, result_string);
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::AreEventsDisallowed()) {
+    // [PRO-1150] Replay error messages.
+    std::string str = flat->ToStdString();
+    recordreplay::RecordReplayString("MessageFormatter::Format", str);
+    flat = isolate->factory()
+               ->NewStringFromUtf8(std::string_view(str))
+               .ToHandleChecked();
+  }
+  return flat;
 }
 
 const char* MessageFormatter::TemplateString(MessageTemplate index) {

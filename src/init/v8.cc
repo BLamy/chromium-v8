@@ -20,6 +20,7 @@
 #include "src/debug/debug.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/execution/frames.h"
+#include "src/execution/futex-emulation.h"
 #include "src/execution/isolate.h"
 #include "src/execution/simulator.h"
 #include "src/flags/flags.h"
@@ -179,6 +180,9 @@ void V8::Initialize() {
 
   // Attaching sets flags, which are about to be frozen.
   recordreplay::MaybeAttach();
+  if (recordreplay::IsRecordingOrReplaying()) {
+    FutexEmulation::RecordReplayInitialize();
+  }
 
   SynchronizationPointSupport::Initialize();
 

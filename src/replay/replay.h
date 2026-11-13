@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <string>
+
 #include "include/v8-local-handle.h"
 #include "include/v8-value.h"
 #include "src/base/macros.h"
@@ -66,6 +68,13 @@ V8_EXPORT_PRIVATE void OrderedUnlock(int lock);
 V8_EXPORT_PRIVATE uintptr_t RecordReplayValue(const char* why, uintptr_t value);
 V8_EXPORT_PRIVATE void RecordReplayBytes(const char* why, void* buf,
                                          size_t size);
+inline void RecordReplayString(const char* why, std::string& str) {
+  size_t length = RecordReplayValue(why, str.length());
+  str.resize(length);
+  if (length) {
+    RecordReplayBytes(why, &str[0], length);
+  }
+}
 
 V8_EXPORT_PRIVATE void Print(const char* format, ...);
 V8_EXPORT_PRIVATE void Diagnostic(const char* format, ...);

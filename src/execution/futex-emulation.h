@@ -146,6 +146,10 @@ class FutexWaitListNode {
   // locks.
   std::atomic<bool> waiting_{false};
   bool interrupted_ = false;
+
+  // While recording or replaying, the id of the task that resolves this async
+  // waiter's promise once it is notified.
+  uint64_t record_replay_resolve_id_ = 0;
   // in_sync_wait_ tracks whether the isolate thread is executing inside a
   // WaitSync scope. Modified exclusively by the isolate thread itself.
   bool in_sync_wait_ = false;
@@ -273,6 +277,11 @@ class FutexEmulation : public AllStatic {
   // Called before |isolate| dies. Removes async waiters owned by |isolate|.
   static void IsolateDeinit(Isolate* isolate);
 
+  // Creates the ordered lock that orders notifies against waiters entering and
+  // leaving the wait list and going away with their isolate, while recording
+  // or replaying.
+  static void RecordReplayInitialize();
+
   // Return the number of threads or async waiters waiting on |addr|. Should
   // only be used for testing.
   static int NumWaitersForTesting(Tagged<JSArrayBuffer> array_buffer,
@@ -288,6 +297,12 @@ class FutexEmulation : public AllStatic {
   friend class FutexWaitListNode;
   friend class ResolveAsyncWaiterPromisesTask;
   friend class AsyncWaiterTimeoutTask;
+
+  // While recording or replaying, the tasks to post once events are allowed
+  // again.
+  class RecordReplayTasksToPost;
+  // The ordered lock, held while this is alive when recording or replaying.
+  class RecordReplayAutoOrderedLock;
 
   template <typename T>
   static Tagged<Object> Wait(Isolate* isolate, WaitMode mode,
@@ -311,16 +326,20 @@ class FutexEmulation : public AllStatic {
       Isolate* isolate, WaitList* wait_list, FutexWaitListNode* node,
       NoGarbageCollectionMutexGuard& lock_guard, bool use_timeout,
       base::TimeTicks timeout_time, T value, T loaded_value,
-      std::optional<void*> wait_location);
+      std::optional<void*> wait_location,
+      RecordReplayAutoOrderedLock* record_replay_ordered_lock);
 
   // Resolve the Promises of the async waiters which belong to |isolate|.
-  static void ResolveAsyncWaiterPromises(Isolate* isolate);
+  // While recording or replaying, only those given record_replay_resolve_id.
+  static void ResolveAsyncWaiterPromises(Isolate* isolate,
+                                         uint64_t record_replay_resolve_id = 0);
 
   static void ResolveAsyncWaiterPromise(FutexWaitListNode* node);
 
   static void HandleAsyncWaiterTimeout(FutexWaitListNode* node);
 
-  static void NotifyAsyncWaiter(FutexWaitListNode* node);
+  static void NotifyAsyncWaiter(FutexWaitListNode* node,
+                                RecordReplayTasksToPost* record_replay_tasks);
 
   // Remove the node's Promise from the NativeContext's Promise set.
   static void CleanupAsyncWaiterPromise(FutexWaitListNode* node);

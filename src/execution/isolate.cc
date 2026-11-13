@@ -115,6 +115,7 @@
 #include "src/regexp/regexp-stack.h"
 #include "src/replay/replay-internal.h"
 #include "src/replay/replay-isolate-data.h"
+#include "src/replay/replay.h"
 #include "src/roots/roots.h"
 #include "src/roots/static-roots.h"
 #include "src/sandbox/js-dispatch-table-inl.h"
@@ -2469,6 +2470,12 @@ bool Isolate::MayAccess(DirectHandle<NativeContext> accessing_context,
 
   // During bootstrapping, callback functions are not enabled yet.
   if (bootstrapper()->IsActive()) return true;
+
+  // Allow all accesses made while replay code is running.
+  if (recordreplay::IsRecordingOrReplaying() &&
+      recordreplay::IsInReplayCode()) {
+    return true;
+  }
   {
     DisallowGarbageCollection no_gc;
 
@@ -8041,6 +8048,13 @@ void Isolate::CountUsage(v8::Isolate::UseCounterFeature feature) {
 
 void Isolate::CountUsage(
     base::Vector<const v8::Isolate::UseCounterFeature> features) {
+  // Don't count usage when recording/replaying, as this can involve posting
+  // tasks to other threads in places that run non-deterministically
+  // (e.g. compilation).
+  if (recordreplay::IsRecordingOrReplaying() &&
+      recordreplay::FeatureEnabled("no-count-usage")) {
+    return;
+  }
   // The counter callback
   // - may cause the embedder to call into V8, which is not generally possible
   //   during GC.

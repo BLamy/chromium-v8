@@ -261,6 +261,11 @@ struct ManagedPtrDestructor
                                              Isolate* isolate);
 };
 
+// When recording or replaying, whether a {Managed}'s GC finalizer that runs
+// with events disallowed leaves its destructor to the isolate's teardown, so
+// that {Managed} destructors only run with events allowed.
+V8_EXPORT_PRIVATE bool ManagedFinalizersDeferredWhenEventsDisallowed();
+
 // The GC finalizer of a managed object, which does not depend on
 // the template parameter.
 V8_EXPORT_PRIVATE void ManagedObjectFinalizer(

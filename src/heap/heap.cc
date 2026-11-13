@@ -5537,6 +5537,19 @@ bool Heap::IsInputHandlingInitialized() const {
 bool Heap::ShouldExpandOldGenerationOnSlowAllocation(LocalHeap* local_heap,
                                                      AllocationOrigin origin) {
   replayio::AutoDisallowEvents disallow_events("Heap::ShouldExpandOldGenerationOnSlowAllocation");
+
+  // Always allow background threads to allocate while recording or replaying
+  // without triggering GC. Waiting on a main thread GC can introduce deadlocks
+  // if the main thread is itself waiting on an ordered lock which this thread
+  // is next in line to acquire. While recording, the task asking the main
+  // thread for the GC is posted with events disallowed, as an unordered task,
+  // which doesn't wake an idle main thread.
+  // The collector asks with no LocalHeap here, which upstream answers below.
+  if (recordreplay::IsRecordingOrReplaying() && local_heap &&
+      !local_heap->is_main_thread()) {
+    return true;
+  }
+
   if (always_allocate()) {
     return true;
   }
@@ -5578,7 +5591,10 @@ bool Heap::ShouldExpandOldGenerationOnSlowAllocation(LocalHeap* local_heap,
   if (incremental_marking()->IsStopped()) {
     auto [limit, reason] = IncrementalMarkingLimitReached();
 
-    if (limit == IncrementalMarkingLimit::kNoLimit) {
+    // Incremental marking is off when recording or replaying. Expand instead
+    // of collecting then.
+    if (limit == IncrementalMarkingLimit::kNoLimit &&
+        !recordreplay::IsRecordingOrReplaying()) {
       // We cannot start incremental marking.
       return false;
     }
@@ -6224,6 +6240,8 @@ void Heap::NotifyBootstrapComplete() {
 void Heap::NotifyOldGenerationExpansion(
     LocalHeap* local_heap, AllocationSpace space, MutablePage* chunk_metadata,
     OldGenerationExpansionNotificationOrigin notification_origin) {
+  replayio::AutoDisallowEvents disallow("Heap::NotifyOldGenerationExpansion");
+
   // Pages created during bootstrapping may contain immortal immovable objects.
   if (!deserialization_complete()) {
     DCHECK_NE(NEW_SPACE, chunk_metadata->owner()->identity());
@@ -6310,6 +6328,8 @@ bool Heap::ShouldCheckForTLSOnStack() const {
 }
 
 void Heap::StartTearDown() {
+  replayio::AutoDisallowEvents disallow("Heap::StartTearDown");
+
   // This may invoke a GC in case marking is running to get us into a
   // well-defined state for tear down.
   CppHeap::From(cpp_heap_)->StartDetachingIsolate();

@@ -5,6 +5,8 @@
 #include "src/execution/futex-emulation.h"
 
 #include <limits>
+#include <memory>
+#include <vector>
 
 #include "src/api/api-inl.h"
 #include "src/base/lazy-instance.h"
@@ -19,6 +21,7 @@
 #include "src/objects/js-promise-inl.h"
 #include "src/objects/managed.h"
 #include "src/objects/objects-inl.h"
+#include "src/replay/replay.h"
 #include "src/tasks/cancelable-task.h"
 
 namespace v8::internal {
@@ -101,6 +104,40 @@ class FutexWaitList {
     FutexWaitListNode* tail;
   };
 
+  // Takes the nodes given the resolve id off the isolate's list of async
+  // waiters to resolve, and returns them as a list of their own.
+  static FutexWaitListNode* RecordReplayTakeNodesToResolve(
+      HeadAndTail* list, uint64_t record_replay_resolve_id) {
+    FutexWaitListNode* taken_head = nullptr;
+    FutexWaitListNode* taken_tail = nullptr;
+    FutexWaitListNode* node = list->head;
+    while (node) {
+      FutexWaitListNode* next = node->next_;
+      if (node->record_replay_resolve_id_ == record_replay_resolve_id) {
+        if (node->prev_) {
+          node->prev_->next_ = next;
+        } else {
+          list->head = next;
+        }
+        if (next) {
+          next->prev_ = node->prev_;
+        } else {
+          list->tail = node->prev_;
+        }
+        node->prev_ = taken_tail;
+        node->next_ = nullptr;
+        if (taken_tail) {
+          taken_tail->next_ = node;
+        } else {
+          taken_head = node;
+        }
+        taken_tail = node;
+      }
+      node = next;
+    }
+    return taken_head;
+  }
+
   // `mutex` protects the composition of the fields below (i.e. no elements may
   // be added or removed without holding this mutex), as well as the `waiting_`
   // and `interrupted_` fields for each individual list node that is currently
@@ -118,6 +155,9 @@ class FutexWaitList {
   // Isolate* -> linked list of Nodes which are waiting for their Promises to
   // be resolved.
   base::SmallMap<std::map<Isolate*, HeadAndTail>> isolate_promises_to_resolve_;
+
+  // The last record_replay_resolve_id_ given to notified async waiters.
+  uint64_t record_replay_last_resolve_id_ = 0;
 };
 
 namespace {
@@ -125,7 +165,66 @@ namespace {
 // {GetWaitList} returns the lazily initialized global wait list.
 DEFINE_LAZY_LEAKY_OBJECT_GETTER(FutexWaitList, GetWaitList)
 
+// While recording or replaying, orders Wake against waiters entering and
+// leaving the wait list and going away with their isolate: all of them change
+// the list under the list's mutex with events disallowed, so the replay would
+// otherwise pick its own order, and a notify would wake other waiters, or none.
+int gRecordReplayOrderedLockId = 0;
+
 }  // namespace
+
+class V8_NODISCARD FutexEmulation::RecordReplayAutoOrderedLock {
+ public:
+  RecordReplayAutoOrderedLock() {
+    if (recordreplay::IsRecordingOrReplaying()) Lock();
+  }
+  ~RecordReplayAutoOrderedLock() { Unlock(); }
+  RecordReplayAutoOrderedLock(const RecordReplayAutoOrderedLock&) = delete;
+  RecordReplayAutoOrderedLock& operator=(const RecordReplayAutoOrderedLock&) =
+      delete;
+
+  void Lock() {
+    DCHECK(!locked_);
+    recordreplay::OrderedLock(gRecordReplayOrderedLockId);
+    locked_ = true;
+  }
+  void Unlock() {
+    if (locked_) {
+      recordreplay::OrderedUnlock(gRecordReplayOrderedLockId);
+      locked_ = false;
+    }
+  }
+  bool locked() const { return locked_; }
+
+ private:
+  bool locked_ = false;
+};
+
+namespace {
+
+// While recording or replaying, whether a wait found another value than the
+// one it waits for is recorded: the page's stores to the memory aren't, so the
+// replay could otherwise find another value than the recording did, and wait
+// where it didn't or the other way around. Called with the list's mutex held
+// and events disallowed under the given label; they are allowed again while
+// the answer is recorded.
+bool RecordReplayFoundOtherValue(bool found_other_value, const char* label) {
+  if (!recordreplay::IsRecordingOrReplaying()) {
+    return found_other_value;
+  }
+  recordreplay::EndDisallowEvents();
+  found_other_value = recordreplay::RecordReplayValue(
+      "FutexEmulation found another value", found_other_value);
+  recordreplay::BeginDisallowEvents(label);
+  return found_other_value;
+}
+
+}  // namespace
+
+void FutexEmulation::RecordReplayInitialize() {
+  gRecordReplayOrderedLockId =
+      recordreplay::CreateOrderedLock("FutexEmulation");
+}
 
 bool FutexWaitListNode::CancelTimeoutTask() {
   DCHECK(IsAsync());
@@ -147,6 +246,7 @@ void FutexWaitListNode::NotifyWake() {
   // variable. The mutex will not be locked if FutexEmulation::Wait hasn't
   // locked it yet. In that case, we set the interrupted_
   // flag to true, which will be tested after the mutex locked by a future wait.
+  replayio::AutoDisallowEvents disallow("FutexWaitListNode::NotifyWake");
   NoGarbageCollectionMutexGuard lock_guard(GetWaitList()->mutex());
 
   // Set the flag first so a woken thread will see it set.
@@ -157,15 +257,20 @@ void FutexWaitListNode::NotifyWake() {
 
 class ResolveAsyncWaiterPromisesTask : public CancelableTask {
  public:
-  explicit ResolveAsyncWaiterPromisesTask(Isolate* isolate)
-      : CancelableTask(isolate), isolate_(isolate) {}
+  explicit ResolveAsyncWaiterPromisesTask(Isolate* isolate,
+                                          uint64_t record_replay_resolve_id = 0)
+      : CancelableTask(isolate),
+        isolate_(isolate),
+        record_replay_resolve_id_(record_replay_resolve_id) {}
 
   void RunInternal() override {
-    FutexEmulation::ResolveAsyncWaiterPromises(isolate_);
+    FutexEmulation::ResolveAsyncWaiterPromises(isolate_,
+                                               record_replay_resolve_id_);
   }
 
  private:
   Isolate* isolate_;
+  uint64_t record_replay_resolve_id_;
 };
 
 class AsyncWaiterTimeoutTask : public CancelableTask {
@@ -182,7 +287,71 @@ class AsyncWaiterTimeoutTask : public CancelableTask {
   FutexWaitListNode* node_;
 };
 
-void FutexEmulation::NotifyAsyncWaiter(FutexWaitListNode* node) {
+// While recording or replaying, FutexEmulation doesn't post tasks from inside
+// its replayio::AutoDisallowEvents scopes: a task posted with events disallowed
+// is an unordered task, which a thread only runs when its queue next reloads,
+// so an idle worker would never resolve an Atomics.waitAsync notified by the
+// page, or the page one notified by a worker. The tasks are queued here
+// instead, and posted when this goes out of scope; declared before the scope
+// and its mutex lock, that is after both have ended.
+class FutexEmulation::RecordReplayTasksToPost {
+ public:
+  RecordReplayTasksToPost() = default;
+  RecordReplayTasksToPost(const RecordReplayTasksToPost&) = delete;
+  RecordReplayTasksToPost& operator=(const RecordReplayTasksToPost&) = delete;
+
+  ~RecordReplayTasksToPost() {
+    for (Task& task : tasks_) {
+      if (task.delay_in_seconds) {
+        task.runner->PostNonNestableDelayedTask(std::move(task.task),
+                                                task.delay_in_seconds);
+      } else {
+        task.runner->PostNonNestableTask(std::move(task.task));
+      }
+    }
+  }
+
+  void Add(const std::shared_ptr<TaskRunner>& runner,
+           std::unique_ptr<CancelableTask> task, double delay_in_seconds = 0) {
+    tasks_.push_back({runner, std::move(task), delay_in_seconds});
+  }
+
+  // Returns the id of this scope's task resolving async waiters' promises in
+  // the node's isolate, adding the task for the first such node. Upstream
+  // instead adds a notified waiter to the isolate's pending task if there is
+  // one, and whether there is depends on how far the waiter's thread has got,
+  // which the replay doesn't reproduce. Requires the list's mutex.
+  uint64_t ResolveId(FutexWaitListNode* node) {
+    Isolate* isolate = node->async_state_->isolate_for_async_waiters;
+    for (ResolveTask& resolve_task : resolve_tasks_) {
+      if (resolve_task.isolate == isolate) {
+        return resolve_task.id;
+      }
+    }
+    uint64_t id = ++GetWaitList()->record_replay_last_resolve_id_;
+    resolve_tasks_.push_back({isolate, id});
+    Add(node->async_state_->task_runner,
+        std::make_unique<ResolveAsyncWaiterPromisesTask>(isolate, id));
+    return id;
+  }
+
+ private:
+  struct Task {
+    std::shared_ptr<TaskRunner> runner;
+    std::unique_ptr<CancelableTask> task;
+    // Zero posts it as an immediate task.
+    double delay_in_seconds;
+  };
+  struct ResolveTask {
+    Isolate* isolate;
+    uint64_t id;
+  };
+  std::vector<Task> tasks_;
+  std::vector<ResolveTask> resolve_tasks_;
+};
+
+void FutexEmulation::NotifyAsyncWaiter(
+    FutexWaitListNode* node, RecordReplayTasksToPost* record_replay_tasks) {
   DCHECK(node->IsAsync());
   // This function can run in any thread.
 
@@ -205,14 +374,19 @@ void FutexEmulation::NotifyAsyncWaiter(FutexWaitListNode* node) {
     isolate_map.insert(
         std::make_pair(node->async_state_->isolate_for_async_waiters,
                        FutexWaitList::HeadAndTail{node, node}));
-    auto task = std::make_unique<ResolveAsyncWaiterPromisesTask>(
-        node->async_state_->isolate_for_async_waiters);
-    node->async_state_->task_runner->PostNonNestableTask(std::move(task));
+    if (!recordreplay::IsRecordingOrReplaying()) {
+      auto task = std::make_unique<ResolveAsyncWaiterPromisesTask>(
+          node->async_state_->isolate_for_async_waiters);
+      node->async_state_->task_runner->PostNonNestableTask(std::move(task));
+    }
   } else {
     // Add this Node into the existing list.
     node->prev_ = it->second.tail;
     it->second.tail->next_ = node;
     it->second.tail = node;
+  }
+  if (recordreplay::IsRecordingOrReplaying()) {
+    node->record_replay_resolve_id_ = record_replay_tasks->ResolveId(node);
   }
 }
 
@@ -370,6 +544,8 @@ Tagged<Object> FutexEmulation::WaitWasmManagedObject(
   }
 
   Managed<FutexManagedObjectWaitList>::Ptr wait_list = waitqueue->ptr();
+  RecordReplayAutoOrderedLock ordered_lock;
+  replayio::AutoDisallowEvents disallow("FutexEmulation::WaitSync");
   NoGarbageCollectionMutexGuard lock_guard(GetWaitList()->mutex());
 
   T loaded_control_value;
@@ -382,7 +558,7 @@ Tagged<Object> FutexEmulation::WaitWasmManagedObject(
 
   return *WaitSyncImpl<FutexManagedObjectWaitList>(
       isolate, wait_list.raw(), node, lock_guard, use_timeout, timeout_time,
-      expected_value, loaded_control_value, {});
+      expected_value, loaded_control_value, {}, &ordered_lock);
 }
 
 template Tagged<Object> FutexEmulation::WaitWasmManagedObject<int32_t>(
@@ -425,13 +601,28 @@ Tagged<Object> FutexEmulation::Wait(Isolate* isolate, WaitMode mode,
     }
   }
 
+  // Replay's V8 10.8 has a scope for this, which asserts as it's entered and
+  // as it's left.
+  auto record_replay_assert = [] {
+    if (recordreplay::IsRecordingOrReplaying() &&
+        !recordreplay::AreEventsDisallowed()) {
+      recordreplay::Assert("[RUN-2378] FutexEmulation::Wait");
+    }
+  };
+  record_replay_assert();
+
+  Tagged<Object> result;
   if (mode == WaitMode::kSync) {
-    return WaitSync(isolate, FutexWaitList::ToWaitLocation(*array_buffer, addr),
-                    value, use_timeout, rel_timeout_ns, call_type);
+    result =
+        WaitSync(isolate, FutexWaitList::ToWaitLocation(*array_buffer, addr),
+                 value, use_timeout, rel_timeout_ns, call_type);
+  } else {
+    DCHECK_EQ(mode, WaitMode::kAsync);
+    result = WaitAsync(isolate, array_buffer, addr, value, use_timeout,
+                       rel_timeout_ns, call_type);
   }
-  DCHECK_EQ(mode, WaitMode::kAsync);
-  return WaitAsync(isolate, array_buffer, addr, value, use_timeout,
-                   rel_timeout_ns, call_type);
+  record_replay_assert();
+  return result;
 }
 
 template <typename T>
@@ -459,6 +650,8 @@ Tagged<Object> FutexEmulation::WaitSync(Isolate* isolate, void* wait_location,
     timeout_time = current_time + rel_timeout;
   }
 
+  RecordReplayAutoOrderedLock ordered_lock;
+  replayio::AutoDisallowEvents disallow("FutexEmulation::WaitSync");
   NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
   std::atomic<T>* p = reinterpret_cast<std::atomic<T>*>(wait_location);
@@ -473,7 +666,8 @@ Tagged<Object> FutexEmulation::WaitSync(Isolate* isolate, void* wait_location,
 
   return *WaitSyncImpl<FutexWaitList, T>(isolate, wait_list, node, lock_guard,
                                          use_timeout, timeout_time, value,
-                                         loaded_value, {wait_location});
+                                         loaded_value, {wait_location},
+                                         &ordered_lock);
 }
 
 template <typename WaitList, typename T>
@@ -481,11 +675,13 @@ DirectHandle<Object> FutexEmulation::WaitSyncImpl(
     Isolate* isolate, WaitList* wait_list, FutexWaitListNode* node,
     NoGarbageCollectionMutexGuard& lock_guard, bool use_timeout,
     base::TimeTicks timeout_time, T value, T loaded_value,
-    std::optional<void*> wait_location) {
+    std::optional<void*> wait_location,
+    RecordReplayAutoOrderedLock* record_replay_ordered_lock) {
   DCHECK(!node->IsWaiting());
 
   DirectHandle<Object> result;
-  if (loaded_value != value) {
+  if (RecordReplayFoundOtherValue(loaded_value != value,
+                                  "FutexEmulation::WaitSync")) {
     return direct_handle(Smi::FromInt(WaitReturnValue::kNotEqualValue),
                          isolate);
   }
@@ -493,6 +689,16 @@ DirectHandle<Object> FutexEmulation::WaitSyncImpl(
   if (wait_location) node->wait_location_ = *wait_location;
   node->waiting_ = true;
   wait_list->AddNode(node);
+
+  // The ordered lock taken for entering the list is released with events
+  // allowed, as OrderedUnlock does nothing otherwise.
+  if (record_replay_ordered_lock->locked()) {
+    recordreplay::EndDisallowEvents();
+    record_replay_ordered_lock->Unlock();
+    recordreplay::BeginDisallowEvents("FutexEmulation::WaitSync");
+  }
+
+  bool record_replay_timed_out = false;
 
   while (true) {
     if (V8_UNLIKELY(node->interrupted_)) {
@@ -518,6 +724,19 @@ DirectHandle<Object> FutexEmulation::WaitSyncImpl(
       //    will be false, so we'll loop and then check interrupts.
       Tagged<Object> interrupt_object =
           isolate->stack_guard()->HandleInterrupts();
+      // HandleInterrupts leaves interrupts pending while events are
+      // disallowed, as they are here, so it doesn't terminate.
+      // Only another thread can ask for that while this one is blocked here,
+      // and going back to waiting would ignore it, so the termination is
+      // handled here. When it arrives can't be replayed, so the recording is
+      // invalidated.
+      if (recordreplay::IsRecordingOrReplaying() &&
+          !IsExceptionHole(interrupt_object) &&
+          isolate->stack_guard()->HasTerminationRequest()) {
+        recordreplay::InvalidateRecording(
+            "Terminate execution while blocked in Atomics.wait");
+        interrupt_object = isolate->TerminateExecution();
+      }
 
       lock_guard.Lock();
 
@@ -544,6 +763,7 @@ DirectHandle<Object> FutexEmulation::WaitSyncImpl(
       if (current_time >= timeout_time) {
         result =
             direct_handle(Smi::FromInt(WaitReturnValue::kTimedOut), isolate);
+        record_replay_timed_out = true;
         break;
       }
 
@@ -557,6 +777,22 @@ DirectHandle<Object> FutexEmulation::WaitSyncImpl(
     }
 
     // Spurious wakeup, interrupt or timeout.
+  }
+
+  // While recording or replaying, the wait leaves the list under the
+  // ordered lock, and whether it timed out is decided again there: the loop
+  // decided it with events disallowed, so a replay could time out a wait the
+  // recording's notify woke, or the other way around. A notify that takes
+  // the lock first wakes the wait even if its timeout has passed.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    lock_guard.Unlock();
+    recordreplay::EndDisallowEvents();
+    record_replay_ordered_lock->Lock();
+    recordreplay::BeginDisallowEvents("FutexEmulation::WaitSync");
+    lock_guard.Lock();
+    if (record_replay_timed_out && !node->waiting_) {
+      result = direct_handle(Smi::FromInt(WaitReturnValue::kOk), isolate);
+    }
   }
 
   node->waiting_ = false;
@@ -607,7 +843,10 @@ Tagged<Object> FutexEmulation::WaitAsync(
   // the node.
   std::weak_ptr<BackingStore> backing_store{array_buffer->GetBackingStore()};
   FutexWaitList* wait_list = GetWaitList();
+  RecordReplayTasksToPost record_replay_tasks;
   {
+    RecordReplayAutoOrderedLock ordered_lock;
+    replayio::AutoDisallowEvents disallow("FutexEmulation::WaitAsync");
     // 16. Perform EnterCriticalSection(WL).
     NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
@@ -621,7 +860,8 @@ Tagged<Object> FutexEmulation::WaitAsync(
       loaded_value = ByteReverse(loaded_value);
     }
 #endif
-    if (loaded_value != value) {
+    if (RecordReplayFoundOtherValue(loaded_value != value,
+                                    "FutexEmulation::WaitAsync")) {
       result_kind = ResultKind::kNotEqual;
     } else if (use_timeout && rel_timeout_ns == 0) {
       result_kind = ResultKind::kTimedOut;
@@ -638,8 +878,13 @@ Tagged<Object> FutexEmulation::WaitAsync(
                 ->cancelable_task_manager(),
             node);
         node->async_state_->timeout_task_id = task->id();
-        node->async_state_->task_runner->PostNonNestableDelayedTask(
-            std::move(task), rel_timeout.InSecondsF());
+        if (recordreplay::IsRecordingOrReplaying()) {
+          record_replay_tasks.Add(node->async_state_->task_runner,
+                                  std::move(task), rel_timeout.InSecondsF());
+        } else {
+          node->async_state_->task_runner->PostNonNestableDelayedTask(
+              std::move(task), rel_timeout.InSecondsF());
+        }
       }
 
       wait_list->AddNode(node);
@@ -723,6 +968,9 @@ int FutexEmulation::Wake(Tagged<JSArrayBuffer> array_buffer, size_t addr,
 int FutexEmulation::Wake(void* wait_location, uint32_t num_waiters_to_wake) {
   int num_waiters_woken = 0;
   FutexWaitList* wait_list = GetWaitList();
+  RecordReplayTasksToPost record_replay_tasks;
+  RecordReplayAutoOrderedLock ordered_lock;
+  replayio::AutoDisallowEvents disallow("FutexEmulation::Wake");
   NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
   auto& location_lists = wait_list->location_lists_;
@@ -754,7 +1002,7 @@ int FutexEmulation::Wake(void* wait_location, uint32_t num_waiters_to_wake) {
       // since NotifyAsyncWaiter will take the node out of the linked list.
       FutexWaitListNode* next_node = node->next_;
       if (node->IsAsync()) {
-        NotifyAsyncWaiter(node);
+        NotifyAsyncWaiter(node, &record_replay_tasks);
       } else {
         // WaitSync will remove the node from the list.
         node->cond_.NotifyOne();
@@ -795,7 +1043,7 @@ int FutexEmulation::Wake(void* wait_location, uint32_t num_waiters_to_wake) {
       node->waiting_ = false;
       // This will schedule a task to call ResolveAsyncWaiterPromises, which
       // will then delete the node.
-      NotifyAsyncWaiter(node);
+      NotifyAsyncWaiter(node, &record_replay_tasks);
     }
     node = next_node;
   }
@@ -812,6 +1060,8 @@ int FutexEmulation::Wake(Address raw_waitqueue, uint32_t num_waiters_to_wake) {
       Cast<Managed<FutexManagedObjectWaitList>>(Tagged<Object>(raw_waitqueue));
   Managed<FutexManagedObjectWaitList>::Ptr wait_list = managed->ptr();
 
+  RecordReplayAutoOrderedLock ordered_lock;
+  replayio::AutoDisallowEvents disallow("FutexEmulation::Wake");
   NoGarbageCollectionMutexGuard lock_guard(GetWaitList()->mutex());
 
   FutexWaitListNode* node = wait_list->head_;
@@ -917,20 +1167,31 @@ void FutexEmulation::ResolveAsyncWaiterPromise(FutexWaitListNode* node) {
   }
 }
 
-void FutexEmulation::ResolveAsyncWaiterPromises(Isolate* isolate) {
+void FutexEmulation::ResolveAsyncWaiterPromises(
+    Isolate* isolate, uint64_t record_replay_resolve_id) {
   // This function must run in the main thread of isolate.
 
   FutexWaitList* wait_list = GetWaitList();
   FutexWaitListNode* node;
   {
+    replayio::AutoDisallowEvents disallow(
+        "FutexEmulation::ResolveAsyncWaiterPromises");
     NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
     auto& isolate_map = wait_list->isolate_promises_to_resolve_;
     auto it = isolate_map.find(isolate);
     DCHECK_NE(isolate_map.end(), it);
 
-    node = it->second.head;
-    isolate_map.erase(it);
+    if (record_replay_resolve_id) {
+      node = FutexWaitList::RecordReplayTakeNodesToResolve(
+          &it->second, record_replay_resolve_id);
+      if (!it->second.head) {
+        isolate_map.erase(it);
+      }
+    } else {
+      node = it->second.head;
+      isolate_map.erase(it);
+    }
   }
 
   // The list of nodes starting from "node" are no longer on any list, so it's
@@ -960,6 +1221,9 @@ void FutexEmulation::HandleAsyncWaiterTimeout(FutexWaitListNode* node) {
   FutexWaitList* wait_list = GetWaitList();
 
   {
+    RecordReplayAutoOrderedLock ordered_lock;
+    replayio::AutoDisallowEvents disallow(
+        "FutexEmulation::HandleAsyncWaiterTimeout");
     NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
     node->async_state_->timeout_task_id = CancelableTaskManager::kInvalidTaskId;
@@ -982,6 +1246,8 @@ void FutexEmulation::HandleAsyncWaiterTimeout(FutexWaitListNode* node) {
 
 void FutexEmulation::IsolateDeinit(Isolate* isolate) {
   FutexWaitList* wait_list = GetWaitList();
+  RecordReplayAutoOrderedLock ordered_lock;
+  replayio::AutoDisallowEvents disallow("FutexEmulation::IsolateDeinit");
   NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
   // Iterate all locations to find nodes belonging to "isolate" and delete them.
@@ -1027,6 +1293,7 @@ int FutexEmulation::NumWaitersForTesting(Tagged<JSArrayBuffer> array_buffer,
                                          size_t addr) {
   void* wait_location = FutexWaitList::ToWaitLocation(array_buffer, addr);
   FutexWaitList* wait_list = GetWaitList();
+  replayio::AutoDisallowEvents disallow("FutexEmulation::NumWaitersForTesting");
   NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
   int num_waiters = 0;
@@ -1051,6 +1318,8 @@ int FutexEmulation::NumUnresolvedAsyncPromisesForTesting(
     Tagged<JSArrayBuffer> array_buffer, size_t addr) {
   void* wait_location = FutexWaitList::ToWaitLocation(array_buffer, addr);
   FutexWaitList* wait_list = GetWaitList();
+  replayio::AutoDisallowEvents disallow(
+      "FutexEmulation::NumUnresolvedAsyncPromisesForTesting");
   NoGarbageCollectionMutexGuard lock_guard(wait_list->mutex());
 
   int num_waiters = 0;

@@ -13,6 +13,7 @@
 #include "src/logging/runtime-call-stats-scope.h"
 
 #if V8_ENABLE_WEBASSEMBLY
+#include "src/replay/replay.h"
 #include "src/wasm/code-space-access.h"
 #include "src/wasm/wasm-code-manager.h"
 #include "src/wasm/wasm-constants.h"
@@ -414,7 +415,12 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> Invoke(Isolate* isolate,
 
   if (params.execution_target == Execution::Target::kCallable) {
     DirectHandle<NativeContext> context = isolate->native_context();
-    if (!IsUndefined(context->script_execution_callback())) {
+    // The script execution callback is ignored when recording or replaying.
+    // Replay's Chromium 108 saw it run at points that differ on a replay
+    // (TT-1029), and Chromium only uses it to keep scripts from running against
+    // windows in the back/forward cache.
+    if (!IsUndefined(context->script_execution_callback()) &&
+        !recordreplay::IsRecordingOrReplaying()) {
       v8::Context::AbortScriptExecutionCallback callback =
           v8::ToCData<v8::Context::AbortScriptExecutionCallback,
                       kApiAbortScriptExecutionCallbackTag>(
