@@ -387,6 +387,10 @@ function previewTypedArray() {
   const length = getDescriptionCount(this.obj.description);
   if (length !== undefined) {
     this.addProperty({ name: "length", value: length }, /* force */ true);
+    // The length is a getter's value, which is where Replay's Chromium 108
+    // reports it (it calls the native getter; the count in the description is
+    // the same number).
+    this.extra.getterValues = [{ name: "length", value: length }];
   }
 }
 
