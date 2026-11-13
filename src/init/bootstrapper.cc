@@ -29,6 +29,7 @@
 #include "src/objects/js-function.h"
 #include "src/objects/module.h"
 #include "src/objects/objects.h"
+#include "src/replay/replay.h"
 #include "src/sandbox/testing.h"
 #ifdef ENABLE_VTUNE_TRACEMARK
 #include "src/extensions/vtunedomain-support-extension.h"
@@ -5268,7 +5269,16 @@ bool Genesis::CompileExtension(Isolate* isolate, v8::Extension* extension) {
   DirectHandle<Context> context(isolate->context(), isolate);
   DCHECK(IsNativeContext(*context));
 
-  if (!cache->Lookup(isolate, name, &function_info)) {
+  // A context made with events disallowed is one of the replay's own, which a
+  // recording doesn't have. If it filled the cache, the page's first context
+  // would find the script there on a replay and compile it when recording, and
+  // every script ID after it would be one off. Such a context compiles its own
+  // copy and leaves the cache alone.
+  const bool record_replay_own_context =
+      recordreplay::IsRecordingOrReplaying() &&
+      recordreplay::AreEventsDisallowed();
+  if (record_replay_own_context ||
+      !cache->Lookup(isolate, name, &function_info)) {
     Handle<String> script_name =
         factory->NewStringFromUtf8(name).ToHandleChecked();
     ScriptCompiler::CompilationDetails compilation_details;
@@ -5278,7 +5288,7 @@ bool Genesis::CompileExtension(Isolate* isolate, v8::Extension* extension) {
             ScriptCompiler::kNoCompileOptions, EXTENSION_CODE,
             &compilation_details);
     if (!maybe_function_info.ToHandle(&function_info)) return false;
-    cache->Add(isolate, name, function_info);
+    if (!record_replay_own_context) cache->Add(isolate, name, function_info);
   }
 
   // Set up the function context. Conceptually, we should clone the
