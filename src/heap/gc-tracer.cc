@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/heap/gc-tracer.h"
+#include "src/replay/replay.h"
 
 #include <cstdarg>
 #include <limits>
@@ -889,6 +890,11 @@ void GCTracer::Output(const char* format, ...) const {
 }
 
 void GCTracer::Print() const {
+  // What a collection did isn't the same on a replay.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    return;
+  }
+
   const base::TimeDelta duration = current_.end_time - current_.start_time;
   const size_t kIncrementalStatsSize = 128;
   char incremental_buffer[kIncrementalStatsSize] = {0};

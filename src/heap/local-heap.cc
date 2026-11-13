@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/heap/local-heap.h"
+#include "src/replay/replay.h"
 
 #include <atomic>
 #include <memory>
@@ -296,6 +297,8 @@ void LocalHeap::ParkSlowPath() {
 }
 
 void LocalHeap::UnparkSlowPath() {
+  replayio::AutoDisallowEvents disallow_events("LocalHeap::UnparkSlowPath");
+
   while (true) {
     ThreadState current_state = ThreadState::Parked();
     if (state_.CompareExchangeStrong(current_state, ThreadState::Running())) {
@@ -358,6 +361,8 @@ void LocalHeap::EnsureParkedBeforeDestruction() {
 }
 
 void LocalHeap::SafepointSlowPath() {
+  replayio::AutoDisallowEvents disallow_events("LocalHeap::SafepointSlowPath");
+
   ThreadState current_state = state_.load_relaxed();
   DCHECK(current_state.IsRunning());
 

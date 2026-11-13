@@ -1924,6 +1924,14 @@ class Heap final {
   void CompleteArrayBufferSweeping();
 
   bool InvokeNearHeapLimitCallback();
+  bool CallNearHeapLimitCallback();
+  size_t record_replay_near_heap_limit_calls_ = 0;
+
+ public:
+  // Called at each progress interrupt when recording/replaying.
+  void RecordReplayOnProgressInterrupt();
+
+ private:
 
   void InvokeIncrementalMarkingPrologueCallbacks();
   void InvokeIncrementalMarkingEpilogueCallbacks();

@@ -185,12 +185,13 @@ void SetRecordingOrReplaying(void* handle) {
   void (*set_progress_interrupt_callback)(void (*)());
   LoadSymbol(handle, "RecordReplaySetProgressInterruptCallback",
              set_progress_interrupt_callback);
-  // As in 108, except for the heap's part: what the memory reducer and the
-  // near-heap-limit callbacks ask for at a progress interrupt isn't ported.
+  // As in 108, except for the memory reducer's part: it's off in a recorded
+  // process (ApplyFlagOverrides).
   set_progress_interrupt_callback([]() {
     CHECK(recordreplay::IsMainThread());
-    internal::Isolate::Current()
-        ->RecordReplayInvokeApiInterruptCallbacksAtProgress();
+    internal::Isolate* isolate = internal::Isolate::Current();
+    isolate->heap()->RecordReplayOnProgressInterrupt();
+    isolate->RecordReplayInvokeApiInterruptCallbacksAtProgress();
   });
 
   void (*set_track_objects_callback)(void (*)(bool));

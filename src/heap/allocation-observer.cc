@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "src/heap/allocation-observer.h"
+#include "src/replay/replay.h"
 
 #include <algorithm>
 
@@ -83,6 +84,10 @@ void AllocationCounter::InvokeAllocationObservers(Address soon_object,
                                                   size_t object_size,
                                                   size_t aligned_object_size) {
   if (observers_.empty()) return;
+
+  replayio::AutoDisallowEvents disallow_events(
+      "AllocationCounter::InvokeAllocationObservers");
+
   DCHECK(!step_in_progress_);
   DCHECK_GE(aligned_object_size, next_counter_ - current_counter_);
   DCHECK(soon_object);
