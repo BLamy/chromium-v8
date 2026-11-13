@@ -307,6 +307,7 @@ MaybeDirectHandle<Context> NewScriptContext(
 V8_WARN_UNUSED_RESULT MaybeHandle<Object> Invoke(Isolate* isolate,
                                                  const InvokeParams& params) {
   RCS_SCOPE(isolate, RuntimeCallCounterId::kInvoke);
+  RecordReplayScrubDivergentProgressScope scrub_divergent_progress;
   DCHECK(!IsJSGlobalObject(*params.receiver));
   DCHECK_LE(params.args.size(), FixedArray::kMaxLength);
   DCHECK(!isolate->has_exception());
@@ -393,6 +394,19 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> Invoke(Isolate* isolate,
       // guaranteed to only happen once in a native context since scripts will
       // always produce name clashes with themselves.
       function->set_context(*context);
+    }
+  }
+
+  // User JS must not run on divergent paths unless paused. From Replay's V8
+  // 10.8, which answers undefined and warns.
+  if (IsJSFunction(*params.target)) {
+    Tagged<SharedFunctionInfo> shared =
+        Cast<JSFunction>(*params.target)->shared();
+    if (RecordReplayIsDivergentUserJSWithoutPause(shared)) {
+      recordreplay::Print(
+          "NonDeterministicUserJSBlocked JSInvoke scriptId=%d position=%d",
+          Cast<Script>(shared->script())->id(), shared->StartPosition());
+      return isolate->factory()->undefined_value();
     }
   }
 

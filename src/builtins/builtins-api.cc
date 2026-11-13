@@ -14,6 +14,7 @@
 #include "src/objects/prototype.h"
 #include "src/objects/templates.h"
 #include "src/objects/visitors.h"
+#include "src/replay/replay-internal.h"
 
 namespace v8 {
 namespace internal {
@@ -62,6 +63,8 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> HandleApiCallHelper(
     Address* receiver_location_on_stack = nullptr) {
   static_assert(std::is_same_v<ArgT, DirectHandle<Object>> ||
                 std::is_same_v<ArgT, Address>);
+  // Cover HandleApiCall / CallApiCallback as well as InvokeApiFunction.
+  RecordReplayScrubDivergentProgressScope scrub_divergent_progress;
 
   Handle<JSReceiver> js_receiver;
   if (is_construct) {
@@ -156,6 +159,7 @@ MaybeHandle<Object> Builtins::InvokeApiFunction(
     base::Vector<const DirectHandle<Object>> args,
     DirectHandle<HeapObject> new_target) {
   RCS_SCOPE(isolate, RuntimeCallCounterId::kInvokeApiFunction);
+  RecordReplayScrubDivergentProgressScope scrub_divergent_progress;
 
   // Do proper receiver conversion for non-strict mode api functions.
   if (!is_construct && !IsJSReceiver(*receiver)) {

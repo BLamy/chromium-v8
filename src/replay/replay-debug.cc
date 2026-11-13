@@ -573,6 +573,37 @@ bool RecordReplayIsRegisteredScript(int script_id) {
   return FindScript(script_id) != nullptr;
 }
 
+bool RecordReplayIsDivergentUserJSWithoutPause(
+    Tagged<SharedFunctionInfo> shared) {
+  if (!recordreplay::IsRecordingOrReplaying() ||
+      !recordreplay::IsMainThread() || !recordreplay::AreEventsDisallowed() ||
+      recordreplay::HasDivergedFromRecording()) {
+    return false;
+  }
+  return IsScript(shared->script()) &&
+         RecordReplayIsRegisteredScript(Cast<Script>(shared->script())->id());
+}
+
+RecordReplayScrubDivergentProgressScope::
+    RecordReplayScrubDivergentProgressScope() {
+  if (!recordreplay::IsRecordingOrReplaying() || !recordreplay::IsMainThread()) {
+    return;
+  }
+  if (!recordreplay::AreEventsDisallowed()) return;
+  if (recordreplay::HasDivergedFromRecording()) return;
+  active_ = true;
+  start_progress_ = *gProgressCounter;
+}
+
+RecordReplayScrubDivergentProgressScope::
+    ~RecordReplayScrubDivergentProgressScope() {
+  if (!active_) return;
+  if (recordreplay::HasDivergedFromRecording()) return;
+  if (start_progress_ >= *gProgressCounter) return;
+  // [RUN-1988] Divergent path advanced the counter via instrumented user code.
+  *gProgressCounter = start_progress_;
+}
+
 void RecordReplayRegisterScript(Isolate* isolate, DirectHandle<Script> script) {
   if (!recordreplay::IsRecordingOrReplaying() ||
       !recordreplay::IsMainThread() || !script->record_replay_instrumented()) {

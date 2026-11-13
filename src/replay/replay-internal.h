@@ -103,6 +103,29 @@ void RecordReplayOnPromiseAdoption(Isolate* isolate,
 
 // replay-debug.cc
 V8_EXPORT_PRIVATE bool RecordReplayShouldEmitOpcodes(bool record_replay_ignore);
+// Whether running this function now would run the program's own instrumented
+// code where a replay doesn't: events are disallowed and nothing has diverged
+// to look at a pause. From Replay's V8 10.8.
+bool RecordReplayIsDivergentUserJSWithoutPause(
+    Tagged<SharedFunctionInfo> shared);
+
+// Puts the progress counter back when code run with events disallowed, and
+// not at a pause, advanced it: that code doesn't run at the same points on a
+// replay. From Replay's V8 10.8 (RUN-1988).
+class V8_NODISCARD RecordReplayScrubDivergentProgressScope {
+ public:
+  RecordReplayScrubDivergentProgressScope();
+  ~RecordReplayScrubDivergentProgressScope();
+  RecordReplayScrubDivergentProgressScope(
+      const RecordReplayScrubDivergentProgressScope&) = delete;
+  RecordReplayScrubDivergentProgressScope& operator=(
+      const RecordReplayScrubDivergentProgressScope&) = delete;
+
+ private:
+  bool active_ = false;
+  uint64_t start_progress_ = 0;
+};
+
 V8_EXPORT_PRIVATE bool RecordReplayIgnoreScriptByURL(const char* url);
 V8_EXPORT_PRIVATE void RecordReplayRegisterScript(Isolate* isolate,
                                                   DirectHandle<Script> script);
