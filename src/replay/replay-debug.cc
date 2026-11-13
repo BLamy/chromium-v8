@@ -556,6 +556,15 @@ RecordReplayDebuggerCompileScope::~RecordReplayDebuggerCompileScope() {
 }
 bool RecordReplayIsDebuggerCompile() { return gDebuggerCompileDepth > 0; }
 
+RecordReplayPageScriptCompileScope::RecordReplayPageScriptCompileScope()
+    : saved_depth_(gDebuggerCompileDepth) {
+  // Counts down from here, so the debugger's scope inside brings it to zero.
+  gDebuggerCompileDepth = -1;
+}
+RecordReplayPageScriptCompileScope::~RecordReplayPageScriptCompileScope() {
+  gDebuggerCompileDepth = saved_depth_;
+}
+
 namespace {
 RecordReplayNewScriptCallback gNewScriptCallback = nullptr;
 }  // namespace

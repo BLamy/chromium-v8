@@ -186,8 +186,8 @@ void V8ProfilerAgentImpl::consoleProfile(const String16& title) {
   auto location = currentDebugLocation(m_session->inspector());
   if (!location) return;
   String16 id = nextProfileId();
+  if (startProfiling(id) == v8::CpuProfilingStatus::kErrorNotSupported) return;
   m_startedProfiles.push_back(ProfileDescriptor(id, title));
-  startProfiling(id);
   m_frontend.consoleProfileStarted(
       id, currentDebugLocation(m_session->inspector()), title);
 }
@@ -287,9 +287,13 @@ void V8ProfilerAgentImpl::restore() {
 Response V8ProfilerAgentImpl::start() {
   if (m_recordingCPUProfile) return Response::Success();
   if (!m_enabled) return Response::ServerError("Profiler is not enabled");
+  String16 id = nextProfileId();
+  if (startProfiling(id) == v8::CpuProfilingStatus::kErrorNotSupported) {
+    return Response::ServerError(
+        "CPU profiling is not supported in Replay-recorded processes");
+  }
   m_recordingCPUProfile = true;
-  m_frontendInitiatedProfileId = nextProfileId();
-  startProfiling(m_frontendInitiatedProfileId);
+  m_frontendInitiatedProfileId = id;
   m_state->setBoolean(ProfilerAgentState::userInitiatedProfiling, true);
   return Response::Success();
 }
@@ -465,7 +469,8 @@ String16 V8ProfilerAgentImpl::nextProfileId() {
       v8::base::Relaxed_AtomicIncrement(&s_lastProfileId, 1));
 }
 
-void V8ProfilerAgentImpl::startProfiling(const String16& title) {
+v8::CpuProfilingStatus V8ProfilerAgentImpl::startProfiling(
+    const String16& title) {
   v8::HandleScope handleScope(m_isolate);
   if (!m_startedProfilesCount) {
     DCHECK(!m_profiler);
@@ -474,12 +479,18 @@ void V8ProfilerAgentImpl::startProfiling(const String16& title) {
         m_state->integerProperty(ProfilerAgentState::samplingInterval, 0);
     if (interval) m_profiler->SetSamplingInterval(interval);
   }
-  ++m_startedProfilesCount;
   v8::CpuProfilingOptions options(
       v8::kLeafNodeLineNumbers, v8::CpuProfilingOptions::kNoSampleLimit,
       /* sampling_interval_us */ 0, v8::MaybeLocal<v8::Context>(),
       v8::CpuProfileSource::kInspector);
-  m_profiler->StartProfiling(toV8String(m_isolate, title), std::move(options));
+  v8::CpuProfilingStatus status = m_profiler->StartProfiling(
+      toV8String(m_isolate, title), std::move(options));
+  if (status == v8::CpuProfilingStatus::kErrorNotSupported) {
+    disposeProfilerIfUnused();
+  } else {
+    ++m_startedProfilesCount;
+  }
+  return status;
 }
 
 std::unique_ptr<protocol::Profiler::Profile> V8ProfilerAgentImpl::stopProfiling(
@@ -493,11 +504,14 @@ std::unique_ptr<protocol::Profiler::Profile> V8ProfilerAgentImpl::stopProfiling(
     profile->Delete();
   }
   --m_startedProfilesCount;
-  if (!m_startedProfilesCount) {
-    m_profiler->Dispose();
-    m_profiler = nullptr;
-  }
+  disposeProfilerIfUnused();
   return result;
+}
+
+void V8ProfilerAgentImpl::disposeProfilerIfUnused() {
+  if (m_startedProfilesCount) return;
+  m_profiler->Dispose();
+  m_profiler = nullptr;
 }
 
 }  // namespace v8_inspector

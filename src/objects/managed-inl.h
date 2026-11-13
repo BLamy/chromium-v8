@@ -32,6 +32,7 @@ void Destructor(void* ptr) {
   // references on their own threads, which nothing orders with this one,
   // so the count differs when replaying.
   recordreplay::Assert("Managed::Destructor");
+  if (*shared_ptr_ptr) OnManagedRemoved(shared_ptr_ptr->get());
   delete shared_ptr_ptr;
 }
 }  // namespace detail
@@ -44,6 +45,7 @@ DirectHandle<Managed<CppType>> Managed<CppType>::From(
   static constexpr ExternalPointerTag kTag = TagForManaged<CppType>::value;
   static_assert(IsManagedExternalPointerType(kTag));
   SharedFlag shared = SharedFlag(IsSharedAllocationType(allocation_type));
+  if (shared_ptr) OnManagedAdded(shared_ptr.get());
   auto destructor = new ManagedPtrDestructor(
       estimated_size, new std::shared_ptr<CppType>{std::move(shared_ptr)},
       detail::Destructor<CppType>, shared);

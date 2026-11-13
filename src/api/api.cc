@@ -136,6 +136,7 @@
 #include "src/parsing/scanner-character-streams.h"
 #include "src/profiler/cpu-profiler.h"
 #include "src/profiler/heap-profiler.h"
+#include "src/replay/replay.h"
 #include "src/profiler/heap-snapshot-generator.h"
 #include "src/profiler/profile-generator-inl.h"
 #include "src/profiler/tick-sample.h"
@@ -5970,6 +5971,7 @@ bool Function::Experimental_IsNopFunction() const {
   if (!is_compiled_scope.is_compiled() &&
       !i::Compiler::Compile(i_isolate, i::handle(sfi, i_isolate),
                             i::Compiler::CLEAR_EXCEPTION, &is_compiled_scope)) {
+    recordreplay::Assert("Function::Experimental_IsNopFunction not compiled");
     return false;
   }
   DCHECK(is_compiled_scope.is_compiled());
@@ -5979,6 +5981,16 @@ bool Function::Experimental_IsNopFunction() const {
   i::Handle<i::BytecodeArray> bytecode_array(sfi->GetBytecodeArray(i_isolate),
                                              i_isolate);
   i::interpreter::BytecodeArrayIterator it(bytecode_array, 0);
+  // A replay puts an activity report at the start of functions that have no
+  // instrumentation (BytecodeArrayBuilder::RecordReplayIncExecutionProgressCounter),
+  // which a recording doesn't have. It isn't part of what the function does.
+  while (!it.done() &&
+         it.current_bytecode() ==
+             i::interpreter::Bytecode::kRecordReplayNotifyActivity) {
+    it.Advance();
+  }
+  recordreplay::Assert("Function::Experimental_IsNopFunction %d",
+                       it.done() ? -1 : static_cast<int>(it.current_bytecode()));
   if (it.current_bytecode() != i::interpreter::Bytecode::kLdaUndefined) {
     return false;
   }

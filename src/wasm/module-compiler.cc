@@ -4212,7 +4212,15 @@ void CompilationStateImpl::SetError() {
 }
 
 void CompilationStateImpl::WaitForBaselineCompileJob() {
-  if (baseline_compile_job_->IsValid()) baseline_compile_job_->Join();
+  if (recordreplay::IsRecordingOrReplaying()) {
+    // Joining the job hands it to the pool as well, and a worker that wakes in
+    // time shares the units with this thread, differently each run. The units
+    // are compiled here instead, as the main task, until none are left.
+    ExecuteCompilationUnits(native_module_weak_, nullptr,
+                            CompilationTier::kBaseline);
+  } else if (baseline_compile_job_->IsValid()) {
+    baseline_compile_job_->Join();
+  }
 #ifdef DEBUG
   base::EnumSet<CompilationEvent> events{
       CompilationEvent::kFinishedBaselineCompilation,

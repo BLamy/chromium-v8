@@ -142,6 +142,19 @@ class V8_EXPORT_PRIVATE V8_NODISCARD RecordReplayDebuggerCompileScope {
   ~RecordReplayDebuggerCompileScope();
 };
 V8_EXPORT_PRIVATE bool RecordReplayIsDebuggerCompile();
+// A script the embedder has the inspector run as the page's own, which is what
+// a DevTools client's Page.addScriptToEvaluateOnNewDocument asks for: it is
+// compiled through the debugger's global evaluation and is still a source of
+// the recording, as it is in Replay's Chromium 108, where it was compiled as
+// any classic script.
+class V8_EXPORT_PRIVATE V8_NODISCARD RecordReplayPageScriptCompileScope {
+ public:
+  RecordReplayPageScriptCompileScope();
+  ~RecordReplayPageScriptCompileScope();
+
+ private:
+  int saved_depth_;
+};
 // While set, the next script made gets this ID: a script compiled from
 // replaced source stands in for the one the recording has.
 V8_EXPORT_PRIVATE void RecordReplaySetReplacementScriptId(int script_id);

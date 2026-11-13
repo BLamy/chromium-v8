@@ -29,6 +29,7 @@
 #include "src/inspector/v8-profiler-agent-impl.h"
 #include "src/inspector/v8-runtime-agent-impl.h"
 #include "src/inspector/v8-schema-agent-impl.h"
+#include "src/replay/replay-internal.h"
 #include "src/replay/replay.h"
 
 namespace v8_inspector {
@@ -628,6 +629,9 @@ V8InspectorSession::EvaluateResult V8InspectorSessionImpl::evaluate(
                                         v8::MicrotasksScope::kRunMicrotasks);
     const v8::Local<v8::String> source =
         toV8String(m_inspector->isolate(), expression);
+    // The embedder's own evaluation: scripts a client asked to have run in
+    // each new document. They're the page's, and sources of a recording.
+    v8::internal::RecordReplayPageScriptCompileScope page_script;
     maybeResultValue = v8::debug::EvaluateGlobal(
         m_inspector->isolate(), source, v8::debug::EvaluateGlobalMode::kDefault,
         /*repl_mode=*/false);

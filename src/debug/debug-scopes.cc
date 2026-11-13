@@ -4,6 +4,7 @@
 
 #include "src/debug/debug-scopes.h"
 
+#include "src/replay/replay.h"
 #include <algorithm>
 #include <optional>
 
@@ -151,6 +152,36 @@ void ScopeIterator::TryParseAndRetrieveScopes() {
       FindInnermostScope(*debug_closure_scope, GetSourcePosition())
           .scope_index();
   current_scope_index_ = start_scope_index_;
+
+  // While recording or replaying, frames are also described at points the
+  // debugger doesn't pause at, such as the implicit catch handler that rejects
+  // an async function's promise. That handler has no source position of its
+  // own, so the frame reports the last position before it, which can be inside
+  // blocks and catch clauses whose contexts are gone. Describe only the
+  // function scope then, as at a return. From Replay's V8 10.8, which compared
+  // the reparsed scopes' variables with each context; here the scopes that
+  // need a context are counted against the frame's context chain.
+  if (recordreplay::IsRecordingOrReplaying() && !ignore_nested_scopes &&
+      frame_inspector_ != nullptr && closure_scope().is_function_scope() &&
+      !context_.is_null()) {
+    Tagged<Context> closure_context = closure_scope().needs_context()
+                                          ? context_->closure_context()
+                                          : function_->context();
+    Tagged<Context> context = *context_;
+    bool matches = true;
+    for (std::optional<DebugScriptScope> scope = current_scope();
+         scope.has_value() && scope->scope_index() != closure_scope_index_;
+         scope = scope->parent()) {
+      if (!scope->needs_context()) continue;
+      if (context == closure_context || IsNativeContext(context)) {
+        matches = false;
+        break;
+      }
+      context = context->previous();
+    }
+    if (matches && context != closure_context) matches = false;
+    if (!matches) ignore_nested_scopes = true;
+  }
 
   if (ignore_nested_scopes) {
     ignore_nested_scopes_ = true;
