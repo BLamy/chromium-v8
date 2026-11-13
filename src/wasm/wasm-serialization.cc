@@ -4,6 +4,7 @@
 
 #include "src/wasm/wasm-serialization.h"
 
+#include "src/replay/replay.h"
 #include "src/base/unique-array.h"
 #include "src/codegen/assembler-arch.h"
 #include "src/codegen/assembler-inl.h"
@@ -858,7 +859,11 @@ class DeserializeCodeTask : public JobTask {
         deserializer_->CopyAndRelocate(unit);
       }
       publish_queue_.Add(std::move(batch));
-      delegate->NotifyConcurrencyIncrease();
+      if (!recordreplay::IsRecordingOrReplaying()) {
+        // The joining thread does all of it: see
+        // RecordReplayNotifyConcurrencyIncrease in module-compiler.cc.
+        delegate->NotifyConcurrencyIncrease();
+      }
     }
   }
 
@@ -942,7 +947,7 @@ void NativeModuleDeserializer::Read(Reader* reader) {
       reloc_queue.Add(std::move(batch));
       DCHECK(batch.empty());
       batch_size = 0;
-      job_handle->NotifyConcurrencyIncrease();
+      if (!recordreplay::IsRecordingOrReplaying()) job_handle->NotifyConcurrencyIncrease();
     }
   }
 
@@ -953,7 +958,7 @@ void NativeModuleDeserializer::Read(Reader* reader) {
 
   if (!batch.empty()) {
     reloc_queue.Add(std::move(batch));
-    job_handle->NotifyConcurrencyIncrease();
+    if (!recordreplay::IsRecordingOrReplaying()) job_handle->NotifyConcurrencyIncrease();
   }
 
   // Wait for all tasks to finish, while participating in their work.
