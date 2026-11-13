@@ -8964,6 +8964,14 @@ void BytecodeGenerator::BuildGeneratorObjectVariableInitialization() {
   builder()->RecordReplayInstrumentationGenerator("generator",
                                                   generator_object());
 
+  // A module's first position is somewhere to stop: Replay's V8 10.8 has a
+  // breakpoint there, before the first statement, whether or not that
+  // statement is an import, which makes no bytecode of its own.
+  if (IsModule(info()->literal()->kind())) {
+    builder()->RecordReplayInstrumentation(
+        "breakpoint", info()->literal()->start_position());
+  }
+
   if (generator_object_var->location() == VariableLocation::LOCAL) {
     // The generator object register is already set to the variable's local
     // register.

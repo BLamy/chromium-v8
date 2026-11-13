@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <optional>
+
+#include "src/replay/replay.h"
 #include "src/debug/debug-evaluate.h"
 
 #include "src/base/iterator.h"
@@ -38,7 +41,18 @@ static MaybeDirectHandle<SharedFunctionInfo> GetFunctionInfo(
                                ScriptOriginOptions(true, true));
   script_details.repl_mode = repl_mode;
   ScriptCompiler::CompilationDetails compilation_details;
-  RecordReplayDebuggerCompileScope debugger_compile;
+  // What a debugger evaluates isn't one of the recording's sources, unless it
+  // names itself: a script a DevTools client runs in a page with a sourceURL
+  // comment is put there as a script of the page's, to be found by that name
+  // and paused in, as every evaluated script is in Replay's Chromium 108.
+  std::optional<RecordReplayDebuggerCompileScope> debugger_compile;
+  if (recordreplay::IsRecordingOrReplaying()) {
+    std::unique_ptr<char[]> text = source->ToCString();
+    if (!strstr(text.get(), "//# sourceURL=") &&
+        !strstr(text.get(), "//@ sourceURL=")) {
+      debugger_compile.emplace();
+    }
+  }
   return Compiler::GetSharedFunctionInfoForScript(
       isolate, source, script_details, ScriptCompiler::kNoCompileOptions,
       ScriptCompiler::kNoCacheNoReason, NOT_NATIVES_CODE, &compilation_details);
