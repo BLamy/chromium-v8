@@ -183,6 +183,9 @@ V8_INLINE uint64_t QPCNowRaw() {
 namespace v8 {
 namespace base {
 
+void (*g_record_replay_begin_pass_through_events)() = nullptr;
+void (*g_record_replay_end_pass_through_events)() = nullptr;
+
 int TimeDelta::InDays() const {
   if (IsMax()) {
     // Preserve max to prevent overflow.

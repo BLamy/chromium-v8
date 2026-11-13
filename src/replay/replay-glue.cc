@@ -18,6 +18,7 @@
 #include "src/api/api-inl.h"
 #include "src/builtins/builtins-utils-inl.h"
 #include "src/debug/debug-interface.h"
+#include "src/execution/execution.h"
 #include "src/execution/frames-inl.h"
 #include "src/execution/isolate-inl.h"
 #include "src/inspector/v8-inspector-impl.h"
@@ -500,6 +501,33 @@ void RecordReplaySetGlueNativesInstaller(
 
 void RecordReplayClearGluePauseData(Isolate* i_isolate);
 
+namespace {
+// Calls one of the glue's own functions. Not through the API: that runs the
+// embedder's before-call callback, and Blink's checks that script isn't
+// forbidden, which it is where a command can arrive (the inspector tells a
+// replay's session that a context is gone while a frame is being detached).
+// The glue's script is the replay's, not the page's. It doesn't run microtasks
+// afterwards either, which would be the page's.
+v8::MaybeLocal<v8::Value> CallGlueFunction(Isolate* i_isolate,
+                                           v8::Local<v8::Function> function,
+                                           int argc,
+                                           v8::Local<v8::Value>* argv) {
+  std::vector<DirectHandle<Object>> args;
+  for (int i = 0; i < argc; i++) {
+    args.push_back(Utils::OpenDirectHandle(*argv[i]));
+  }
+  DirectHandle<Object> result;
+  if (!Execution::TryCall(i_isolate, Utils::OpenDirectHandle(*function),
+                          i_isolate->factory()->undefined_value(),
+                          base::VectorOf(args),
+                          Execution::MessageHandling::kKeepPending, nullptr)
+           .ToHandle(&result)) {
+    return {};
+  }
+  return Utils::ToLocal(result);
+}
+}  // namespace
+
 std::string RecordReplayRunGlueCommand(Isolate* i_isolate, const char* command,
                                        const char* params) {
   v8::Isolate* isolate = reinterpret_cast<v8::Isolate*>(i_isolate);
@@ -530,8 +558,8 @@ std::string RecordReplayRunGlueCommand(Isolate* i_isolate, const char* command,
   v8::Local<v8::Value> args[] = {ToV8String(isolate, command),
                                  ToV8String(isolate, params)};
   v8::Local<v8::Value> result;
-  if (!glue->command_callback.Get(isolate)
-           ->Call(context, v8::Undefined(isolate), 2, args)
+  if (!CallGlueFunction(i_isolate, glue->command_callback.Get(isolate), 2,
+                        args)
            .ToLocal(&result)) {
     return "{\"error\":\"Command failed\"}";
   }
@@ -552,8 +580,8 @@ void RecordReplayClearGluePauseData(Isolate* i_isolate) {
   v8::Local<v8::Context> context = glue->context.Get(isolate);
   v8::Context::Scope context_scope(context);
   v8::TryCatch try_catch(isolate);
-  USE(glue->clear_pause_data_callback.Get(isolate)->Call(
-      context, v8::Undefined(isolate), 0, nullptr));
+  USE(CallGlueFunction(i_isolate, glue->clear_pause_data_callback.Get(isolate),
+                       0, nullptr));
 }
 
 void RecordReplayDisposeGlue(Isolate* i_isolate) {

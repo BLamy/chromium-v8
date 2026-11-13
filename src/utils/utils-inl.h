@@ -26,6 +26,7 @@ class V8_NODISCARD TimedScope {
 
  private:
   static inline double TimestampMs() {
+    base::RecordReplayPassThroughEventsScope pass_through;
     return V8::GetCurrentPlatform()->MonotonicallyIncreasingTime() *
            static_cast<double>(base::Time::kMillisecondsPerSecond);
   }

@@ -116,6 +116,7 @@ class ElapsedTimer final {
 
  private:
   static V8_INLINE TimeTicks Now() {
+    RecordReplayPassThroughEventsScope pass_through;
     TimeTicks now = TimeTicks::Now();
     DCHECK(!now.IsNull());
     return now;

@@ -151,6 +151,11 @@ void SetRecordingOrReplaying(void* handle) {
       dlsym(handle, "RecordReplayInvalidateRecording"));
   gWarning = reinterpret_cast<decltype(gWarning)>(
       dlsym(handle, "RecordReplayWarning"));
+  base::g_record_replay_begin_pass_through_events =
+      reinterpret_cast<void (*)()>(
+          dlsym(handle, "RecordReplayBeginPassThroughEvents"));
+  base::g_record_replay_end_pass_through_events = reinterpret_cast<void (*)()>(
+      dlsym(handle, "RecordReplayEndPassThroughEvents"));
 
   gMainThread = pthread_self();
   recordreplay::gIsRecordingOrReplaying = true;

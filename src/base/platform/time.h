@@ -421,6 +421,32 @@ inline Time operator+(const TimeDelta& delta, const Time& time) {
 // Time::Now() may actually decrease or jump).  But note that TimeTicks may
 // "stand still", for example if the computer suspended.
 
+// Set when the process records or replays (src/replay), null otherwise. While
+// a scope is alive, calls to the system on this thread run for real and aren't
+// part of the recording: for reading a clock to measure something, at a point
+// a replay doesn't reach the same way. From Replay's V8 10.8, whose
+// replayio::AutoPassThroughEvents this is for code below src/replay.
+V8_BASE_EXPORT extern void (*g_record_replay_begin_pass_through_events)();
+V8_BASE_EXPORT extern void (*g_record_replay_end_pass_through_events)();
+
+class V8_NODISCARD RecordReplayPassThroughEventsScope {
+ public:
+  RecordReplayPassThroughEventsScope() {
+    if (g_record_replay_begin_pass_through_events) {
+      g_record_replay_begin_pass_through_events();
+    }
+  }
+  ~RecordReplayPassThroughEventsScope() {
+    if (g_record_replay_end_pass_through_events) {
+      g_record_replay_end_pass_through_events();
+    }
+  }
+  RecordReplayPassThroughEventsScope(
+      const RecordReplayPassThroughEventsScope&) = delete;
+  RecordReplayPassThroughEventsScope& operator=(
+      const RecordReplayPassThroughEventsScope&) = delete;
+};
+
 class V8_BASE_EXPORT TimeTicks final
     : public time_internal::TimeBase<TimeTicks> {
  public:
