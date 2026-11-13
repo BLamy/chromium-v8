@@ -575,7 +575,19 @@ int RecordReplayNextScriptId() {
     return gNextScriptId++;
   }
   static std::atomic<int> next(gNextDivergentScriptId);
-  return next.fetch_add(1, std::memory_order_relaxed);
+  int id = next.fetch_add(1, std::memory_order_relaxed);
+  // Worker threads share this pool, so which of them gets which ID depends on
+  // timing, and a DevTools client attached to a worker is told the IDs
+  // (Debugger.scriptParsed), which is in the recording. A thread that compiles
+  // with events allowed gets, on a replay, the ID it got when recording.
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !recordreplay::IsMainThread() && !recordreplay::AreEventsDisallowed() &&
+      !recordreplay::AreEventsPassedThrough() &&
+      !recordreplay::HasDivergedFromRecording()) {
+    id = static_cast<int>(recordreplay::RecordReplayValue(
+        "RecordReplayNextScriptId", static_cast<uintptr_t>(id)));
+  }
+  return id;
 }
 
 bool RecordReplayIsRegisteredScript(int script_id) {

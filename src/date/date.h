@@ -7,6 +7,7 @@
 
 #include <cmath>
 
+#include "src/replay/replay.h"
 #include "src/base/small-vector.h"
 #include "src/base/timezone-cache.h"
 #include "src/common/globals.h"
@@ -94,6 +95,15 @@ class V8_EXPORT_PRIVATE DateCache {
     }
     bool is_dst = DaylightSavingsOffsetInMs(time_ms) != 0;
     const char** name = is_dst ? &dst_tz_name_ : &tz_name_;
+    // A replay's own code asks with events disallowed (its inspector session
+    // describing a logged Date). What it's told isn't kept here: the program's
+    // first ask reads the clock, a recorded call, and has to find this empty
+    // where the recording did. See ICUTimezoneCache::LocalTimezone.
+    if (recordreplay::IsRecordingOrReplaying() &&
+        (recordreplay::AreEventsDisallowed() ||
+         recordreplay::IsInReplayCode())) {
+      return tz_cache_->LocalTimezone(static_cast<double>(time_ms));
+    }
     if (*name == nullptr) {
       *name = tz_cache_->LocalTimezone(static_cast<double>(time_ms));
     }

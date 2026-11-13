@@ -204,6 +204,10 @@ void V8::Initialize() {
   // validation and compilation hints, flags 15.8 doesn't have.
   if (recordreplay::IsRecordingOrReplaying()) {
     v8_flags.wasm_lazy_compilation = false;
+    // Wasm code is collected when the last isolate using a shared module
+    // drops its reference to it, and whichever isolate that is posts the
+    // collection's task: a different one each run.
+    v8_flags.wasm_code_gc = false;
   }
 #endif  // V8_ENABLE_WEBASSEMBLY
 
