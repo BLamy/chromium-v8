@@ -403,9 +403,11 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> Invoke(Isolate* isolate,
     Tagged<SharedFunctionInfo> shared =
         Cast<JSFunction>(*params.target)->shared();
     if (RecordReplayIsDivergentUserJSWithoutPause(shared)) {
-      recordreplay::Print(
-          "NonDeterministicUserJSBlocked JSInvoke scriptId=%d position=%d",
-          Cast<Script>(shared->script())->id(), shared->StartPosition());
+      recordreplay::Warning(
+          "NonDeterministicUserJSBlocked",
+          {{"trigger", "JSInvoke"},
+           {"scriptId", Cast<Script>(shared->script())->id()},
+           {"position", shared->StartPosition()}});
       return isolate->factory()->undefined_value();
     }
   }

@@ -26,6 +26,8 @@ void (*gOnConsoleMessage)(size_t bookmark);
 void (*gOnExceptionUnwind)();
 void (*gNotifyActivity)();
 void (*gPrint)(const char* format, va_list args);
+void (*gWarning)(const char* kind, const recordreplay::WarningField* fields,
+                 size_t count);
 void (*gDiagnostic)(const char* format, va_list args);
 void (*gOnInstrument)(const char* kind, const char* function,
                       int function_index);
@@ -147,6 +149,8 @@ void SetRecordingOrReplaying(void* handle) {
       dlsym(handle, "RecordReplayFeatureEnabled"));
   gInvalidateRecording = reinterpret_cast<decltype(gInvalidateRecording)>(
       dlsym(handle, "RecordReplayInvalidateRecording"));
+  gWarning = reinterpret_cast<decltype(gWarning)>(
+      dlsym(handle, "RecordReplayWarning"));
 
   gMainThread = pthread_self();
   recordreplay::gIsRecordingOrReplaying = true;
@@ -354,6 +358,15 @@ void Diagnostic(const char* format, ...) {
   va_start(args, format);
   gDiagnostic(format, args);
   va_end(args);
+}
+
+void Warning(const char* kind, std::initializer_list<WarningField> fields) {
+  if (!IsRecordingOrReplaying()) return;
+  if (gWarning) {
+    gWarning(kind, fields.begin(), fields.size());
+  } else {
+    Print("Warning: %s", kind);
+  }
 }
 
 void MaybeAttach() {

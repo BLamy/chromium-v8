@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <initializer_list>
 #include <string>
 
 #include "include/v8-local-handle.h"
@@ -75,6 +76,43 @@ inline void RecordReplayString(const char* why, std::string& str) {
     RecordReplayBytes(why, &str[0], length);
   }
 }
+
+// A detail of a warning, in the layout the driver's RecordReplayWarning takes
+// (RecordReplayWarningField in the backend's recording/Warning.h).
+struct WarningField {
+  enum Type : int { String, Int, Unsigned, Double, Bool };
+
+  WarningField(const char* key, const char* value)
+      : key(key), type(String), string_value(value) {}
+  WarningField(const char* key, const std::string& value)
+      : key(key), type(String), string_value(value.c_str()) {}
+  WarningField(const char* key, int value)
+      : key(key), type(Int), int_value(value) {}
+  WarningField(const char* key, int64_t value)
+      : key(key), type(Int), int_value(value) {}
+  WarningField(const char* key, uint64_t value)
+      : key(key), type(Unsigned), unsigned_value(value) {}
+  WarningField(const char* key, double value)
+      : key(key), type(Double), double_value(value) {}
+  WarningField(const char* key, bool value)
+      : key(key), type(Bool), bool_value(value) {}
+
+  const char* key;
+  Type type;
+  union {
+    const char* string_value;
+    int64_t int_value;
+    uint64_t unsigned_value;
+    double double_value;
+    bool bool_value;
+  };
+};
+
+// Adds a warning about unexpected behavior to the recording. |kind| names the
+// condition, the fields hold the details that differ between occurrences. With
+// a driver that has no RecordReplayWarning, the kind is printed.
+V8_EXPORT_PRIVATE void Warning(const char* kind,
+                               std::initializer_list<WarningField> fields = {});
 
 V8_EXPORT_PRIVATE void Print(const char* format, ...);
 V8_EXPORT_PRIVATE void Diagnostic(const char* format, ...);
