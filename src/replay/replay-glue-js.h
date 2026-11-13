@@ -365,6 +365,16 @@ ProtocolObjectPreview.prototype = {
       }
     }
 
+    // The prototype is the [[Prototype]] internal property, which is there
+    // whatever the prototype is. A __proto__ entry among the properties isn't
+    // when the prototype is a proxy: listing stops there, so that its traps
+    // aren't run.
+    const internalPrototype = (allProperties.internalProperties || []).find(
+      p => p.name == "[[Prototype]]");
+    if (internalPrototype && internalPrototype.value &&
+        internalPrototype.value.objectId) {
+      prototype = internalPrototype;
+    }
     let prototypeId;
     if (prototype && prototype.value && prototype.value.objectId) {
       prototypeId = remoteObjectToProtocolId(prototype.value);

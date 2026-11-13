@@ -104,14 +104,22 @@ V8Debugger::~V8Debugger() {
 
 void V8Debugger::enable() {
   if (m_enableCount++) return;
+  // Which session is the first to enable the debugger isn't the same on a
+  // replay, where the replay's own session is there before any client the
+  // page was recorded with. What the first one sets off (a safepoint to
+  // collect source positions reads the clock) is none of the program's
+  // business, so it isn't in the recording on either side.
+  v8::replayio::AutoDisallowEvents disallowEvents("V8Debugger::enable");
   v8::HandleScope scope(m_isolate);
   v8::debug::SetDebugDelegate(m_isolate, this);
-  // Breaks into the debugger the next time JS runs, which on a replay reads a clock
-  // the recording has no call for and takes it off the recording.
-  if (!v8::recordreplay::IsRecordingOrReplaying()) {
-    m_isolate->AddNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback,
-                                        this);
-  }
+  // As upstream and in 108. When recording or replaying the heap only counts
+  // the calls a collection would have made and makes them at the next
+  // progress interrupt, as many on a replay as were recorded
+  // (Heap::InvokeNearHeapLimitCallback), so the break this asks for comes at
+  // the same point on both sides. Without it a page a DevTools client is
+  // debugging dies at its heap limit instead of pausing there.
+  m_isolate->AddNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback,
+                                      this);
   v8::debug::ChangeBreakOnException(m_isolate, v8::debug::NoBreakOnException);
   m_pauseOnExceptionsState = v8::debug::NoBreakOnException;
 #if V8_ENABLE_WEBASSEMBLY
@@ -140,6 +148,8 @@ void V8Debugger::disable() {
     }
   }
   if (--m_enableCount) return;
+  // As in enable(): the last session to go isn't the same on a replay.
+  v8::replayio::AutoDisallowEvents disallowEvents("V8Debugger::disable");
   clearContinueToLocation();
   m_taskWithScheduledBreak = nullptr;
   m_externalAsyncTaskPauseRequested = false;
@@ -150,10 +160,8 @@ void V8Debugger::disable() {
   v8::debug::LeaveDebuggingForIsolate(m_isolate);
 #endif  // V8_ENABLE_WEBASSEMBLY
   v8::debug::SetDebugDelegate(m_isolate, nullptr);
-  if (!v8::recordreplay::IsRecordingOrReplaying()) {
-    m_isolate->RemoveNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback,
-                                           m_originalHeapLimit);
-  }
+  m_isolate->RemoveNearHeapLimitCallback(&V8Debugger::nearHeapLimitCallback,
+                                         m_originalHeapLimit);
   m_originalHeapLimit = 0;
 }
 
@@ -526,6 +534,41 @@ void V8Debugger::handleProgramBreak(
       });
   if (!hasAgents) return;
 
+  // V8 breaks with events disallowed when recording or replaying
+  // (Debug::OnDebugBreak), as a break is mostly something a replay's own
+  // session asks for. A client the page was recorded with is different: its
+  // session is there again on a replay, made by the same messages, the break
+  // comes at the same point, and the pause is part of the recording, as it is
+  // in 108: the client has to hear of it, and its resume has to end the
+  // message loop. So for such a client the pause runs with events allowed,
+  // and a replay's own sessions aren't told of it.
+  bool recordedClient = false;
+  if (v8::recordreplay::IsRecordingOrReplaying() &&
+      !v8::recordreplay::HasDivergedFromRecording()) {
+    m_inspector->forEachSession(
+        contextGroupId,
+        [isOOMBreak, &recordedClient](V8InspectorSessionImpl* session) {
+          if (session->debuggerAgent()->acceptsPause(isOOMBreak) &&
+              !v8::recordreplay::IsReplayOwnedInspectorSession(session)) {
+            recordedClient = true;
+          }
+        });
+  }
+  struct AllowEventsForRecordedPause {
+    explicit AllowEventsForRecordedPause(bool active)
+        : active_(active && v8::recordreplay::AreEventsDisallowed()) {
+      if (active_) v8::recordreplay::EndDisallowEvents();
+    }
+    ~AllowEventsForRecordedPause() {
+      if (active_) v8::recordreplay::BeginDisallowEvents("Debug::OnDebugBreak");
+    }
+    const bool active_;
+  } allowEvents(recordedClient);
+  auto toldOfPause = [recordedClient](V8InspectorSessionImpl* session) {
+    return !recordedClient ||
+           !v8::recordreplay::IsReplayOwnedInspectorSession(session);
+  };
+
   if (breakpointIds.size() == 1 &&
       breakpointIds[0] == m_continueToLocationBreakpointId) {
     v8::Context::Scope contextScope(pausedContext);
@@ -544,8 +587,9 @@ void V8Debugger::handleProgramBreak(
   m_inspector->forEachSession(
       contextGroupId,
       [&pausedContext, &exception, &breakpointIds, &exceptionType, &isUncaught,
-       isOOMBreak, &breakReasons](V8InspectorSessionImpl* session) {
-        if (session->debuggerAgent()->acceptsPause(isOOMBreak)) {
+       isOOMBreak, &breakReasons, &toldOfPause](V8InspectorSessionImpl* session) {
+        if (session->debuggerAgent()->acceptsPause(isOOMBreak) &&
+            toldOfPause(session)) {
           session->debuggerAgent()->didPause(
               InspectedContext::contextId(pausedContext), exception,
               breakpointIds, exceptionType, isUncaught, breakReasons);
@@ -565,8 +609,9 @@ void V8Debugger::handleProgramBreak(
     m_pausedContextGroupId = 0;
   }
   m_inspector->forEachSession(contextGroupId,
-                              [](V8InspectorSessionImpl* session) {
-                                if (session->debuggerAgent()->enabled()) {
+                              [&toldOfPause](V8InspectorSessionImpl* session) {
+                                if (session->debuggerAgent()->enabled() &&
+                                    toldOfPause(session)) {
                                   session->debuggerAgent()->clearBreakDetails();
                                   session->debuggerAgent()->didContinue();
                                 }

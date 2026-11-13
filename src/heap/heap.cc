@@ -1192,6 +1192,17 @@ bool GCCallbacksScope::CheckReenter() const {
 
 void Heap::HandleGCRequest() {
   replayio::AutoDisallowEvents disallow_events("Heap::HandleGCRequest");
+  // See StartIncrementalMarkingIfAllocationLimitIsReached.
+  if (record_replay_full_gc_requested_) {
+    record_replay_full_gc_requested_ = false;
+    const size_t new_space_target_capacity = NewSpaceTargetCapacity();
+    if (OldGenerationSpaceAvailable() <= new_space_target_capacity ||
+        GlobalSpaceAvailable() <= new_space_target_capacity) {
+      CollectAllGarbage(GCFlag::kNoFlags,
+                        GarbageCollectionReason::kAllocationLimit);
+      return;
+    }
+  }
   if (IsStressingScavenge() && stress_scavenge_observer_->HasRequestedGC()) {
     CollectGarbage(NEW_SPACE, GarbageCollectionReason::kTesting);
     stress_scavenge_observer_->RequestedGCDone();
@@ -1948,6 +1959,25 @@ void Heap::StartIncrementalMarkingIfAllocationLimitIsReached(
     const GCCallbackFlags gc_callback_flags,
     std::optional<GarbageCollectionReason> gc_reason) {
   replayio::AutoDisallowEvents disallow_events("Heap::StartIncrementalMarkingIfAllocationLimitIsReached");
+  // Incremental marking is off when recording or replaying, and upstream it
+  // is what notices here that the old generation has reached its limit, which
+  // it mostly does by promotion, where nothing else looks. 108 had incremental
+  // marking and so collected at this point. Here the main thread asks for a
+  // full collection at its next stack check instead, at the limit upstream
+  // starts marking at.
+  if (recordreplay::IsRecordingOrReplaying() &&
+      !incremental_marking()->CanAndShouldBeStarted() &&
+      local_heap->is_main_thread_for(this) &&
+      !record_replay_full_gc_requested_ && !always_allocate() &&
+      deserialization_complete() && gc_state() != TEAR_DOWN) {
+    const size_t new_space_target_capacity = NewSpaceTargetCapacity();
+    if (OldGenerationSpaceAvailable() <= new_space_target_capacity ||
+        GlobalSpaceAvailable() <= new_space_target_capacity) {
+      record_replay_full_gc_requested_ = true;
+      isolate()->stack_guard()->RequestGC();
+    }
+    return;
+  }
   if (incremental_marking()->IsStopped() &&
       incremental_marking()->CanAndShouldBeStarted()) {
     auto [limit, reason] = IncrementalMarkingLimitReached();
@@ -5591,10 +5621,14 @@ bool Heap::ShouldExpandOldGenerationOnSlowAllocation(LocalHeap* local_heap,
   if (incremental_marking()->IsStopped()) {
     auto [limit, reason] = IncrementalMarkingLimitReached();
 
-    // Incremental marking is off when recording or replaying. Expand instead
-    // of collecting then.
-    if (limit == IncrementalMarkingLimit::kNoLimit &&
-        !recordreplay::IsRecordingOrReplaying()) {
+    // Incremental marking is off when recording or replaying, so this is where
+    // a full collection starts once the old generation is past its limit, as
+    // upstream does without incremental marking. 108 expanded here only with
+    // its v8-flags-gc feature off; by default it had incremental marking, and
+    // so collected at the limit. Expanding instead meant no full collection
+    // until the heap's hard limit, and nothing a page dropped was ever
+    // finalized before then.
+    if (limit == IncrementalMarkingLimit::kNoLimit) {
       // We cannot start incremental marking.
       return false;
     }

@@ -208,6 +208,11 @@ void V8::Initialize() {
     // drops its reference to it, and whichever isolate that is posts the
     // collection's task: a different one each run.
     v8_flags.wasm_code_gc = false;
+    // Wasm runs in the one tier, as JS runs in the interpreter only: when a
+    // function tiers up depends on how its budget was spent, on whichever
+    // isolates share its module, and its speed changes when it does.
+    v8_flags.wasm_tier_up = false;
+    v8_flags.wasm_dynamic_tiering = false;
   }
 #endif  // V8_ENABLE_WEBASSEMBLY
 

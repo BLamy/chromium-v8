@@ -1926,6 +1926,9 @@ class Heap final {
   bool InvokeNearHeapLimitCallback();
   bool CallNearHeapLimitCallback();
   size_t record_replay_near_heap_limit_calls_ = 0;
+  // Whether the main thread has asked, with a GC interrupt, for the full
+  // collection incremental marking would have led to.
+  bool record_replay_full_gc_requested_ = false;
 
  public:
   // Called at each progress interrupt when recording/replaying.
