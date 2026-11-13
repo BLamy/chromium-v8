@@ -21,6 +21,7 @@
 #include "src/profiler/cpu-profiler-inl.h"
 #include "src/profiler/profiler-stats.h"
 #include "src/profiler/symbolizer.h"
+#include "src/replay/replay.h"
 #include "src/utils/locked-queue-inl.h"
 
 #if V8_ENABLE_WEBASSEMBLY
@@ -729,6 +730,11 @@ void CpuProfiler::StartProcessorIfNotStarted(
     symbolizer_ =
         std::make_unique<Symbolizer>(code_observer_->instruction_stream_map());
   }
+
+  // Samples are taken wherever the profiler thread's signals interrupt this
+  // thread, and the replay can't send them at the same points, so a recording
+  // with CPU profiles can't be replayed.
+  recordreplay::InvalidateRecording("CPU profiler started");
 
   base::TimeDelta sampling_interval = ComputeSamplingInterval();
   processor_.reset(new SamplingEventsProcessor(

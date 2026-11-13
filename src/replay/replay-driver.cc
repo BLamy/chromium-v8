@@ -48,6 +48,7 @@ bool (*gHasDivergedFromRecording)();
 // Not in every driver, so these two may be null.
 void (*gAssert)(const char* format, va_list args);
 bool (*gFeatureEnabled)(const char* feature, const char* subfeature);
+void (*gInvalidateRecording)(const char* format, ...);
 const char* (*gReplaceSourceContents)(const char* contents);
 size_t (*gNewBookmark)();
 void (*gOnAnnotation)(const char* kind, const char* contents);
@@ -144,6 +145,8 @@ void SetRecordingOrReplaying(void* handle) {
       dlsym(handle, "RecordReplayAssert"));
   gFeatureEnabled = reinterpret_cast<decltype(gFeatureEnabled)>(
       dlsym(handle, "RecordReplayFeatureEnabled"));
+  gInvalidateRecording = reinterpret_cast<decltype(gInvalidateRecording)>(
+      dlsym(handle, "RecordReplayInvalidateRecording"));
 
   gMainThread = pthread_self();
   recordreplay::gIsRecordingOrReplaying = true;
@@ -288,6 +291,12 @@ bool AreEventsAvailable() {
 bool FeatureEnabled(const char* feature) {
   if (!IsRecordingOrReplaying()) return false;
   return !gFeatureEnabled || gFeatureEnabled(feature, nullptr);
+}
+
+void InvalidateRecording(const char* why) {
+  if (IsRecordingOrReplaying() && gInvalidateRecording) {
+    gInvalidateRecording("%s", why);
+  }
 }
 
 void Assert(const char* format, ...) {

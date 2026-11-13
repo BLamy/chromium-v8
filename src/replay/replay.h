@@ -49,6 +49,8 @@ V8_EXPORT_PRIVATE bool AreEventsAvailable();
 // Whether the process is recording or replaying with a feature of the driver
 // on. A driver that can't say has every feature on.
 V8_EXPORT_PRIVATE bool FeatureEnabled(const char* feature);
+// Marks the recording as one that can't be replayed, and says why.
+V8_EXPORT_PRIVATE void InvalidateRecording(const char* why);
 // Checked when replaying against what the recording had here.
 V8_EXPORT_PRIVATE void Assert(const char* format, ...);
 V8_EXPORT_PRIVATE void BeginDisallowEvents(const char* label);
