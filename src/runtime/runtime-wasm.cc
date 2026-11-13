@@ -29,6 +29,7 @@
 #include "src/objects/objects-inl.h"
 #include "src/objects/property-descriptor.h"
 #include "src/runtime/runtime-utils.h"
+#include "src/replay/replay.h"
 #include "src/strings/unicode-inl.h"
 #include "src/trap-handler/trap-handler.h"
 #include "src/wasm/module-compiler.h"
@@ -230,6 +231,7 @@ RUNTIME_FUNCTION(Runtime_ThrowWasmError) {
 RUNTIME_FUNCTION(Runtime_ThrowWasmStackOverflow) {
   SealHandleScope shs(isolate);
   DCHECK_LE(0, args.length());
+  recordreplay::InvalidateRecording("Stack overflow");
   return isolate->StackOverflow();
 }
 
