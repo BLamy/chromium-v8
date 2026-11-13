@@ -4,6 +4,7 @@
 
 #if V8_TARGET_ARCH_ARM64
 
+#include "src/replay/replay.h"
 #include "src/regexp/arm64/regexp-macro-assembler-arm64.h"
 
 #include "src/base/bits.h"
@@ -213,6 +214,29 @@ void RegExpMacroAssemblerARM64::EmitBacktrack() {
     }
 
     __ bind(&next);
+  }
+  // A match can backtrack for many seconds without advancing the progress
+  // counter. Every 2^20 backtracks, call the preemption handler, which reports
+  // activity so replay hang detection sees the process is busy, and continues
+  // the match unless an interrupt is pending. Matches with a backtrack limit
+  // use the counter for it. This is what Replay's V8 10.8 does on x64; it had
+  // nothing for arm64, where recordings are made too now.
+  if (recordreplay::IsRecordingOrReplaying() && !has_backtrack_limit()) {
+    Label no_activity;
+    // The counter's low 32 bits wrap to zero every 2^20 additions.
+    __ Ldr(w10, MemOperand(frame_pointer(), kBacktrackCountOffset));
+    __ Adds(w10, w10, Operand(1 << 12));
+    __ Str(w10, MemOperand(frame_pointer(), kBacktrackCountOffset));
+    __ B(ne, &no_activity);
+    // Near the stack limit, the handler would report a stack overflow that
+    // the match doesn't otherwise have.
+    __ Mov(x10, ExternalReference::address_of_jslimit(isolate()));
+    __ Ldr(x10, MemOperand(x10));
+    __ Add(x10, x10, Operand(4 * KB));
+    __ Cmp(sp, x10);
+    __ B(ls, &no_activity);
+    CallIf(&check_preempt_label_, al);
+    __ Bind(&no_activity);
   }
   Pop(w10);
   __ Add(x10, code_pointer(), Operand(w10, UXTW));
