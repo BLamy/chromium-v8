@@ -361,6 +361,12 @@ class V8_BASE_EXPORT OS {
                                                void* new_address,
                                                MemoryPermission access);
 
+#if V8_OS_LINUX
+  // Replay: asks the kernel now what RemapPages() would ask it the first time
+  // it's called, which is on whichever thread sets up an isolate first.
+  static void RecordReplayPrimeKernelChecks();
+#endif
+
   // Make part of the process's data memory read-only.
   static void SetDataReadOnly(void* address, size_t size);
 

@@ -13,6 +13,7 @@
 #include "src/base/atomicops.h"
 #include "src/base/once.h"
 #include "src/base/platform/platform.h"
+#include "src/base/platform/time.h"
 #include "src/codegen/cpu-features.h"
 #include "src/codegen/interface-descriptors.h"
 #include "src/common/code-memory-access.h"
@@ -203,6 +204,15 @@ void V8::Initialize() {
   // count as setting it. From Replay's V8 10.8, which also turns off lazy
   // validation and compilation hints, flags 15.8 doesn't have.
   if (recordreplay::IsRecordingOrReplaying()) {
+    // Two things V8 finds out the first time they're needed, by calls that
+    // are recorded: on Linux, what the kernel's version is and how fine its
+    // clock is. The first time is on whichever thread sets up an isolate or
+    // decodes a module first, a worker as often as not, and not the same one
+    // on a replay. So they're found out here, on the thread that starts V8.
+#if V8_OS_LINUX
+    base::OS::RecordReplayPrimeKernelChecks();
+#endif
+    (void)base::TimeTicks::IsHighResolution();
     v8_flags.wasm_lazy_compilation = false;
     // Wasm code is collected when the last isolate using a shared module
     // drops its reference to it, and whichever isolate that is posts the
