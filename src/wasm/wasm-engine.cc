@@ -558,8 +558,40 @@ void ManagedNativeModuleAdded(NativeModule* native_module) {
   GetWasmEngine()->native_module_cache_.AddHolder(native_module);
 }
 
+void NativeModuleCache::RemoveHolderDeferred(Isolate* isolate,
+                                             NativeModule* native_module) {
+  base::MutexGuard lock(&deferred_mutex_);
+  deferred_removals_.emplace(isolate, native_module);
+}
+
+void NativeModuleCache::RemoveDeferredHolders(Isolate* isolate) {
+  if (!record_replay_mode()) return;
+  std::vector<NativeModule*> modules;
+  {
+    base::MutexGuard lock(&deferred_mutex_);
+    auto range = deferred_removals_.equal_range(isolate);
+    for (auto it = range.first; it != range.second; ++it) {
+      modules.push_back(it->second);
+    }
+    deferred_removals_.erase(range.first, range.second);
+  }
+  // The cache still holds each module, so the pointers are good. The order
+  // the collector came to them in isn't the same on a replay, and doesn't
+  // matter: what's left afterwards is the same.
+  for (NativeModule* native_module : modules) RemoveHolder(native_module);
+}
+
 void ManagedNativeModuleRemoved(NativeModule* native_module) {
-  GetWasmEngine()->native_module_cache_.RemoveHolder(native_module);
+  NativeModuleCache& cache = GetWasmEngine()->native_module_cache_;
+  if (cache.record_replay_mode() && recordreplay::AreEventsDisallowed()) {
+    cache.RemoveHolderDeferred(Isolate::TryGetCurrent(), native_module);
+    return;
+  }
+  cache.RemoveHolder(native_module);
+}
+
+void RecordReplayRemoveDeferredNativeModuleHolders(Isolate* isolate) {
+  GetWasmEngine()->native_module_cache_.RemoveDeferredHolders(isolate);
 }
 
 // static

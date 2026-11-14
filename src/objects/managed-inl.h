@@ -31,7 +31,11 @@ void Destructor(void* ptr) {
   // (e.g. a wasm NativeModule shared with workers) and release their
   // references on their own threads, which nothing orders with this one,
   // so the count differs when replaying.
-  recordreplay::Assert("Managed::Destructor");
+  // A wrapper the C++ heap manages is destroyed by its sweeper, which doesn't
+  // run at the same points on a replay: nothing to assert there.
+  if (!recordreplay::AreEventsDisallowed()) {
+    recordreplay::Assert("Managed::Destructor");
+  }
   if (*shared_ptr_ptr) OnManagedRemoved(shared_ptr_ptr->get());
   delete shared_ptr_ptr;
 }

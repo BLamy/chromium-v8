@@ -4887,13 +4887,37 @@ void Isolate::Delete(Isolate* isolate) {
   Free(isolate);
 }
 
+namespace {
+const char kRecordReplayDeinitializeLabel[] = "Isolate::Deinitialize";
+
+// Isolate::Deinitialize keeps its work out of the recording, which Replay's
+// V8 10.8 doesn't: how much there is to tear down depends on what was
+// allocated. Some of that work 10.8 made the same on a replay and asserts
+// about, or takes ordered locks for: the futex wait lists, the managed
+// objects' destructors and the wasm engine's bookkeeping. Those steps are in
+// the recording here too, or the driver warns of each assert and lock.
+class V8_NODISCARD RecordReplayAllowEventsInTearDown {
+ public:
+  RecordReplayAllowEventsInTearDown()
+      : active_(recordreplay::IsRecordingOrReplaying()) {
+    if (active_) recordreplay::EndDisallowEvents();
+  }
+  ~RecordReplayAllowEventsInTearDown() {
+    if (active_) recordreplay::BeginDisallowEvents(kRecordReplayDeinitializeLabel);
+  }
+
+ private:
+  const bool active_;
+};
+}  // namespace
+
 // static
 void Isolate::Deinitialize(Isolate* isolate) {
   DCHECK_NOT_NULL(isolate);
   // How much there is to tear down depends on what reads at a pause allocated,
   // as does what it calls, like the time for each page of the heap. So none of
   // that can be in a recording, as with a GC.
-  replayio::AutoDisallowEvents disallow_events("Isolate::Deinitialize");
+  replayio::AutoDisallowEvents disallow_events(kRecordReplayDeinitializeLabel);
   // v8::V8::Dispose() must only be called after deleting all isolates.
   DCHECK_NOT_NULL(V8::GetCurrentPlatform());
   // Temporarily set this isolate as current so that various parts of
@@ -5280,7 +5304,11 @@ void Isolate::Deinit() {
   metrics_recorder_->NotifyIsolateDisposal();
   recorder_context_id_map_.clear();
 
-  FutexEmulation::IsolateDeinit(this);
+  {
+    // In the recording, as in Replay's V8 10.8: see Isolate::Deinitialize.
+    RecordReplayAllowEventsInTearDown allow_events;
+    FutexEmulation::IsolateDeinit(this);
+  }
 
   debug()->Unload();
 
@@ -5362,7 +5390,10 @@ void Isolate::Deinit() {
   // ceremony. This signals to the tear down code that we are in a safepoint.
   base::RecursiveMutexGuard safepoint(&heap_.safepoint()->local_heaps_mutex_);
 
-  ReleaseSharedPtrs();
+  {
+    RecordReplayAllowEventsInTearDown allow_events;
+    ReleaseSharedPtrs();
+  }
 
   builtins_.TearDown();
   bootstrapper_->TearDown();
@@ -5387,6 +5418,13 @@ void Isolate::Deinit() {
   ast_string_constants_ = nullptr;
 
   heap_.TearDown();
+#if V8_ENABLE_WEBASSEMBLY
+  {
+    // Every wrapper of a native module this isolate had is destroyed by now.
+    RecordReplayAllowEventsInTearDown allow_events;
+    wasm::RecordReplayRemoveDeferredNativeModuleHolders(this);
+  }
+#endif  // V8_ENABLE_WEBASSEMBLY
   isolate_group()->RemoveIsolate(this);
 
   delete inner_pointer_to_code_cache_;
@@ -5405,7 +5443,10 @@ void Isolate::Deinit() {
 #endif  // defined(V8_ENABLE_ETW_STACK_WALKING)
 
 #if V8_ENABLE_WEBASSEMBLY
-  wasm::GetWasmEngine()->RemoveIsolate(this);
+  {
+    RecordReplayAllowEventsInTearDown allow_events;
+    wasm::GetWasmEngine()->RemoveIsolate(this);
+  }
 
   delete wasm_code_look_up_cache_;
   wasm_code_look_up_cache_ = nullptr;

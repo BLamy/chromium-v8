@@ -74,6 +74,10 @@ class V8_EXPORT_PRIVATE InstantiationResultResolver {
 };
 
 // Native modules cached by their wire bytes and compile-time imports.
+// Replay: see NativeModuleCache::RemoveHolderDeferred().
+V8_EXPORT_PRIVATE void RecordReplayRemoveDeferredNativeModuleHolders(
+    Isolate* isolate);
+
 class NativeModuleCache {
  public:
   NativeModuleCache();
@@ -90,6 +94,17 @@ class NativeModuleCache {
   // whichever thread drops the last reference.
   void AddHolder(NativeModule* native_module);
   void RemoveHolder(NativeModule* native_module);
+
+  // Whether the cache is in its record/replay mode: see the constructor.
+  bool record_replay_mode() const { return ordered_lock_id_ != 0; }
+
+  // A wrapper the C++ heap manages is destroyed by the collector's sweeper, at
+  // a point which isn't the same on a replay, and taking the holder off there
+  // would decide what a later compile of the same bytes finds in the cache.
+  // The removal waits for the isolate's tear down, which every wrapper of the
+  // isolate is destroyed by, so that the same holders are removed on a replay.
+  void RemoveHolderDeferred(Isolate* isolate, NativeModule* native_module);
+  void RemoveDeferredHolders(Isolate* isolate);
 
   struct Key {
     Key(size_t prefix_hash, WasmEnabledFeatures enabled_features,
@@ -188,7 +203,6 @@ class NativeModuleCache {
   base::ConditionVariable cache_cv_;
 
   // Whether the cache behaves as described above, decided by the constructor.
-  bool record_replay_mode() const { return ordered_lock_id_ != 0; }
 
   // In that mode: the cache's ordered lock, and the cached modules with the
   // number of {Managed}s holding each.
@@ -198,6 +212,11 @@ class NativeModuleCache {
     size_t holders = 0;
   };
   std::map<NativeModule*, HeldModule> held_modules_;
+
+  // Replay: holders the collector released, waiting for their isolate's tear
+  // down. See RemoveHolderDeferred(). Protected by {deferred_mutex_}.
+  base::Mutex deferred_mutex_;
+  std::multimap<Isolate*, NativeModule*> deferred_removals_;
 };
 
 // The central data structure that represents an engine instance capable of
@@ -573,6 +592,7 @@ class V8_EXPORT_PRIVATE WasmEngine {
   NativeModuleCache native_module_cache_;
   friend void ManagedNativeModuleAdded(NativeModule* native_module);
   friend void ManagedNativeModuleRemoved(NativeModule* native_module);
+  friend void RecordReplayRemoveDeferredNativeModuleHolders(Isolate* isolate);
 
   // End of fields protected by {mutex_}.
   //////////////////////////////////////////////////////////////////////////////
