@@ -4,6 +4,9 @@
 
 #include "src/objects/value-serializer.h"
 
+#include "src/replay/replay.h"
+#include "src/numbers/conversions-inl.h"
+
 #include <type_traits>
 
 #include "include/v8-maybe.h"
@@ -578,6 +581,20 @@ void ValueSerializer::WriteSmi(Tagged<Smi> smi) {
 }
 
 void ValueSerializer::WriteHeapNumber(Tagged<HeapNumber> number) {
+  // Replay: the same number can be a small integer on one run and a heap
+  // number on another (a worker's sum of wasm results was, for a reason not
+  // yet found), which a page can't tell apart but these bytes can, and what a
+  // message serializes to is asserted when replaying. A heap number that a
+  // small integer could hold is written as one. It reads back as the same
+  // number.
+  if (recordreplay::IsRecordingOrReplaying()) {
+    double value = number->value();
+    int32_t as_int;
+    if (DoubleToSmiInteger(value, &as_int)) {
+      WriteSmi(Smi::FromInt(as_int));
+      return;
+    }
+  }
   WriteTag(SerializationTag::kDouble);
   WriteDouble(number->value());
 }
