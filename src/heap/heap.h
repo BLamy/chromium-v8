@@ -1929,6 +1929,10 @@ class Heap final {
   // Whether the main thread has asked, with a GC interrupt, for the full
   // collection incremental marking would have led to.
   bool record_replay_full_gc_requested_ = false;
+  // Whether to ask for it: see the definition.
+  bool RecordReplayAllocationLimitReached();
+  // The old generation's size after the last collection asked for that way.
+  size_t record_replay_consumed_after_gc_ = 0;
 
  public:
   // Called at each progress interrupt when recording/replaying.

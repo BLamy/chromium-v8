@@ -1190,16 +1190,41 @@ bool GCCallbacksScope::CheckReenter() const {
   return heap_->gc_callbacks_depth_ == 1;
 }
 
+// Whether the main thread should collect now, for want of incremental
+// marking. Upstream starts marking when the old generation or the whole heap
+// is within a new space of its limit (the soft limits of
+// IncrementalMarkingLimitReached()), and at once when a limit is used up. Its
+// marking then advances as the page allocates, so one collection follows
+// another only after some allocation. With a small heap limit the heap is
+// nearly always that close to it, and collecting each time made a replay with
+// a 48 MB limit collect at every stack check. So near a limit, a collection
+// waits until the old generation has grown by an eighth of its maximum since
+// the last one asked for here.
+bool Heap::RecordReplayAllocationLimitReached() {
+  const size_t old_generation_space_available = OldGenerationSpaceAvailable();
+  const size_t global_space_available = GlobalSpaceAvailable();
+  if (old_generation_space_available == 0 || global_space_available == 0) {
+    return true;
+  }
+  const size_t new_space_target_capacity = NewSpaceTargetCapacity();
+  if (old_generation_space_available > new_space_target_capacity &&
+      global_space_available > new_space_target_capacity) {
+    return false;
+  }
+  const size_t consumed = OldGenerationConsumedBytes();
+  const size_t step = std::max<size_t>(MaxOldGenerationSize() / 8, MB);
+  return consumed >= record_replay_consumed_after_gc_ + step;
+}
+
 void Heap::HandleGCRequest() {
   replayio::AutoDisallowEvents disallow_events("Heap::HandleGCRequest");
   // See StartIncrementalMarkingIfAllocationLimitIsReached.
   if (record_replay_full_gc_requested_) {
     record_replay_full_gc_requested_ = false;
-    const size_t new_space_target_capacity = NewSpaceTargetCapacity();
-    if (OldGenerationSpaceAvailable() <= new_space_target_capacity ||
-        GlobalSpaceAvailable() <= new_space_target_capacity) {
+    if (RecordReplayAllocationLimitReached()) {
       CollectAllGarbage(GCFlag::kNoFlags,
                         GarbageCollectionReason::kAllocationLimit);
+      record_replay_consumed_after_gc_ = OldGenerationConsumedBytes();
       return;
     }
   }
@@ -1970,9 +1995,7 @@ void Heap::StartIncrementalMarkingIfAllocationLimitIsReached(
       local_heap->is_main_thread_for(this) &&
       !record_replay_full_gc_requested_ && !always_allocate() &&
       deserialization_complete() && gc_state() != TEAR_DOWN) {
-    const size_t new_space_target_capacity = NewSpaceTargetCapacity();
-    if (OldGenerationSpaceAvailable() <= new_space_target_capacity ||
-        GlobalSpaceAvailable() <= new_space_target_capacity) {
+    if (RecordReplayAllocationLimitReached()) {
       record_replay_full_gc_requested_ = true;
       isolate()->stack_guard()->RequestGC();
     }
